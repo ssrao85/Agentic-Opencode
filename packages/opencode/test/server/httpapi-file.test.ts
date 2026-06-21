@@ -68,6 +68,23 @@ describe("file HttpApi", () => {
     expect(new Uint8Array(await download.arrayBuffer())).toEqual(contents)
   })
 
+  test("downloads HTML and archive files with their original bytes and content types", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const files = [
+      { name: "page.html", type: "text/html", bytes: new TextEncoder().encode("<!doctype html>\n<h1>Hello</h1>\n") },
+      { name: "archive.zip", type: "application/zip", bytes: new Uint8Array([80, 75, 3, 4, 0, 255]) },
+      { name: "archive.tar.gz", type: "application/gzip", bytes: new Uint8Array([31, 139, 8, 0, 0, 255]) },
+    ]
+    await Promise.all(files.map((file) => Bun.write(path.join(tmp.path, file.name), file.bytes)))
+
+    for (const file of files) {
+      const download = await request(FilePaths.download, tmp.path, { path: file.name })
+      expect(download.status).toBe(200)
+      expect(download.headers.get("content-type")).toContain(file.type)
+      expect(new Uint8Array(await download.arrayBuffer())).toEqual(file.bytes)
+    }
+  })
+
   test("serves search endpoints", async () => {
     await using tmp = await tmpdir({ git: true })
     await Bun.write(path.join(tmp.path, "hello.txt"), "needle")
