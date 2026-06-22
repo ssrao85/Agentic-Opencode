@@ -77,6 +77,7 @@ export type Event =
   | EventMcpBrowserOpenFailed
   | EventCommandExecuted
   | EventProjectUpdated
+  | EventManagedWorkspaceCreated
   | EventSessionStatus
   | EventSessionIdle
   | EventQuestionAsked
@@ -1516,6 +1517,19 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "managed.workspace.created"
+        properties: {
+          id: string
+          directory: string
+          name?: string
+          time: {
+            created: number
+            updated: number
+          }
+        }
+      }
+    | {
+        id: string
         type: "session.status"
         properties: {
           sessionID: string
@@ -2459,8 +2473,14 @@ export type Project = {
   sandboxes: Array<string>
 }
 
-export type ProjectCreateResult = {
+export type ManagedWorkspace = {
+  id: string
   directory: string
+  name?: string
+  time: {
+    created: number
+    updated: number
+  }
 }
 
 export type ProjectNotFoundError = {
@@ -5021,6 +5041,20 @@ export type EventProjectUpdated = {
   }
 }
 
+export type EventManagedWorkspaceCreated = {
+  id: string
+  type: "managed.workspace.created"
+  properties: {
+    id: string
+    directory: string
+    name?: string
+    time: {
+      created: number
+      updated: number
+    }
+  }
+}
+
 export type EventSessionStatus = {
   id: string
   type: "session.status"
@@ -6809,12 +6843,40 @@ export type ProjectCreateError = ProjectCreateErrors[keyof ProjectCreateErrors]
 
 export type ProjectCreateResponses = {
   /**
-   * Created project directory
+   * Created managed workspace
    */
-  200: ProjectCreateResult
+  200: ManagedWorkspace
 }
 
 export type ProjectCreateResponse = ProjectCreateResponses[keyof ProjectCreateResponses]
+
+export type ProjectManagedData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/managed"
+}
+
+export type ProjectManagedErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectManagedError = ProjectManagedErrors[keyof ProjectManagedErrors]
+
+export type ProjectManagedResponses = {
+  /**
+   * List of managed workspaces
+   */
+  200: Array<ManagedWorkspace>
+}
+
+export type ProjectManagedResponse = ProjectManagedResponses[keyof ProjectManagedResponses]
 
 export type ProjectCurrentData = {
   body?: never

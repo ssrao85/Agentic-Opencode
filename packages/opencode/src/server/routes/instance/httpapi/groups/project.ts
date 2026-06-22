@@ -15,10 +15,6 @@ const UpdatePayload = Schema.Struct({
   commands: Schema.optional(Project.Info.fields.commands),
 })
 
-const CreateResult = Schema.Struct({
-  directory: Schema.String,
-}).annotate({ identifier: "ProjectCreateResult" })
-
 export const ProjectApi = HttpApi.make("project")
   .add(
     HttpApiGroup.make("project")
@@ -35,12 +31,22 @@ export const ProjectApi = HttpApi.make("project")
         ),
         HttpApiEndpoint.post("create", root, {
           query: WorkspaceRoutingQuery,
-          success: described(CreateResult, "Created project directory"),
+          success: described(Project.ManagedWorkspace, "Created managed workspace"),
         }).annotateMerge(
           OpenApi.annotations({
             identifier: "project.create",
             summary: "Create a project",
             description: "Create a project directory in the managed workspace root.",
+          }),
+        ),
+        HttpApiEndpoint.get("managed", `${root}/managed`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Schema.Array(Project.ManagedWorkspace), "List of managed workspaces"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "project.managed",
+            summary: "List managed workspaces",
+            description: "List shared workspace directories managed by this OpenCode server.",
           }),
         ),
         HttpApiEndpoint.get("current", `${root}/current`, {

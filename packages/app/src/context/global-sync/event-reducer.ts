@@ -2,6 +2,7 @@ import { Binary } from "@opencode-ai/core/util/binary"
 import { produce, reconcile, type SetStoreFunction, type Store } from "solid-js/store"
 import type {
   Message,
+  ManagedWorkspace,
   Part,
   PermissionRequest,
   Project,
@@ -21,11 +22,22 @@ const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 export function applyGlobalEvent(input: {
   event: { type: string; properties?: unknown }
   project: Project[]
+  managedWorkspace: ManagedWorkspace[]
   setGlobalProject: (next: Project[] | ((draft: Project[]) => Project[])) => void
+  setManagedWorkspace: (next: ManagedWorkspace[] | ((draft: ManagedWorkspace[]) => ManagedWorkspace[])) => void
   refresh: () => void
 }) {
   if (input.event.type === "global.disposed" || input.event.type === "server.connected") {
     input.refresh()
+    return
+  }
+
+  if (input.event.type === "managed.workspace.created") {
+    const properties = input.event.properties as ManagedWorkspace
+    input.setManagedWorkspace((list) => [
+      properties,
+      ...list.filter((item) => item.id !== properties.id && item.directory !== properties.directory),
+    ])
     return
   }
 

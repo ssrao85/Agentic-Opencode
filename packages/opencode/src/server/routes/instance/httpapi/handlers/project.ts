@@ -1,11 +1,8 @@
 import * as InstanceState from "@/effect/instance-state"
 import { Project } from "@/project/project"
-import { Flag } from "@opencode-ai/core/flag/flag"
-import { FSUtil } from "@opencode-ai/core/fs-util"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
-import path from "path"
 import { InstanceHttpApi } from "../api"
 import { ProjectNotFoundError } from "../errors"
 import { markInstanceForReload } from "../lifecycle"
@@ -14,16 +11,17 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
   Effect.gen(function* () {
     const svc = yield* Project.Service
     const project = yield* ProjectV2.Service
-    const fs = yield* FSUtil.Service
 
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
       return yield* svc.list()
     })
 
     const create = Effect.fn("ProjectHttpApi.create")(function* () {
-      const directory = path.join(Flag.OPENCODE_WORKSPACE_ROOT, crypto.randomUUID())
-      yield* fs.ensureDir(directory).pipe(Effect.orDie)
-      return { directory }
+      return yield* svc.createManaged()
+    })
+
+    const managed = Effect.fn("ProjectHttpApi.managed")(function* () {
+      return yield* svc.listManaged()
     })
 
     const current = Effect.fn("ProjectHttpApi.current")(function* () {
@@ -66,6 +64,7 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
     return handlers
       .handle("list", list)
       .handle("create", create)
+      .handle("managed", managed)
       .handle("current", current)
       .handle("initGit", initGit)
       .handle("update", update)

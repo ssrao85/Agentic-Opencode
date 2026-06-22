@@ -1,7 +1,8 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
-import { and, eq, sql } from "drizzle-orm"
+import { and, desc, eq, sql } from "drizzle-orm"
 import { Database } from "@opencode-ai/core/database/database"
 import { ProjectDirectoryTable, ProjectTable } from "@opencode-ai/core/project/sql"
+import { ManagedWorkspaceTable } from "@opencode-ai/core/project/managed-workspace.sql"
 import { ProjectDirectories } from "@opencode-ai/core/project/directories"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
@@ -21,6 +22,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import path from "path"
 
 const ProjectVcs = Schema.Literal("git")
 
@@ -42,6 +44,17 @@ const ProjectTime = Schema.Struct({
   initialized: optionalOmitUndefined(NonNegativeInt),
 })
 
+export const ManagedWorkspace = Schema.Struct({
+  id: Schema.String,
+  directory: Schema.String,
+  name: optionalOmitUndefined(Schema.String),
+  time: Schema.Struct({
+    created: NonNegativeInt,
+    updated: NonNegativeInt,
+  }),
+}).annotate({ identifier: "ManagedWorkspace" })
+export type ManagedWorkspace = Schema.Schema.Type<typeof ManagedWorkspace>
+
 export const Info = Schema.Struct({
   id: ProjectV2.ID,
   worktree: Schema.String,
@@ -58,7 +71,12 @@ export const Event = {
   Updated: EventV2.define({ type: "project.updated", schema: Info.fields }),
 }
 
+export const ManagedWorkspaceEvent = {
+  Created: EventV2.define({ type: "managed.workspace.created", schema: ManagedWorkspace.fields }),
+}
+
 type Row = typeof ProjectTable.$inferSelect
+type ManagedWorkspaceRow = typeof ManagedWorkspaceTable.$inferSelect
 
 export function fromRow(row: Row): Info {
   const icon =
@@ -82,6 +100,18 @@ export function fromRow(row: Row): Info {
     },
     sandboxes: row.sandboxes,
     commands: row.commands ?? undefined,
+  }
+}
+
+function managedWorkspaceFromRow(row: ManagedWorkspaceRow): ManagedWorkspace {
+  return {
+    id: row.id,
+    directory: row.directory,
+    name: row.name ?? undefined,
+    time: {
+      created: row.time_created,
+      updated: row.time_updated,
+    },
   }
 }
 
@@ -118,6 +148,8 @@ export interface Interface {
   readonly fromDirectory: (directory: string) => Effect.Effect<{ project: Info; sandbox: string }>
   readonly discover: (input: Info) => Effect.Effect<void>
   readonly list: () => Effect.Effect<Info[]>
+  readonly listManaged: () => Effect.Effect<ManagedWorkspace[]>
+  readonly createManaged: () => Effect.Effect<ManagedWorkspace>
   readonly get: (id: ProjectV2.ID) => Effect.Effect<Info | undefined>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
   readonly initGit: (input: { directory: string; project: Info }) => Effect.Effect<Info>
@@ -165,6 +197,14 @@ export const layer = Layer.effect(
           directory: "global",
           project: data.id,
           payload: { type: Event.Updated.type, properties: data },
+        }),
+      )
+
+    const emitManagedCreated = (data: ManagedWorkspace) =>
+      Effect.sync(() =>
+        GlobalBus.emit("event", {
+          directory: "global",
+          payload: { type: ManagedWorkspaceEvent.Created.type, properties: data },
         }),
       )
 
@@ -366,6 +406,66 @@ export const layer = Layer.effect(
       return (yield* db.select().from(ProjectTable).all().pipe(Effect.orDie)).map(fromRow)
     })
 
+    const registerManaged = Effect.fn("Project.registerManaged")(function* (directory: string) {
+      const now = Date.now()
+      const row = yield* db
+        .insert(ManagedWorkspaceTable)
+        .values({
+          id: crypto.randomUUID(),
+          directory: AbsolutePath.make(FSUtil.resolve(directory)),
+          time_created: now,
+          time_updated: now,
+        })
+        .onConflictDoNothing({ target: ManagedWorkspaceTable.directory })
+        .returning()
+        .get()
+        .pipe(Effect.orDie)
+      if (row) return managedWorkspaceFromRow(row)
+      const existing = yield* db
+        .select()
+        .from(ManagedWorkspaceTable)
+        .where(eq(ManagedWorkspaceTable.directory, AbsolutePath.make(FSUtil.resolve(directory))))
+        .get()
+        .pipe(Effect.orDie)
+      if (!existing) return yield* Effect.die(new Error(`Managed workspace registration failed: ${directory}`))
+      return managedWorkspaceFromRow(existing)
+    })
+
+    const listManaged = Effect.fn("Project.listManaged")(function* () {
+      const root = FSUtil.resolve(Flag.OPENCODE_WORKSPACE_ROOT)
+      const entries = yield* fs.readDirectoryEntries(root).pipe(Effect.catch(() => Effect.succeed([])))
+      const directories = yield* Effect.forEach(
+        entries.filter((entry) => entry.type === "directory" || entry.type === "symlink"),
+        (entry) => {
+          const directory = path.join(root, entry.name)
+          return fs.isDir(directory).pipe(Effect.map((exists) => (exists ? directory : undefined)))
+        },
+        { concurrency: "unbounded" },
+      )
+      yield* Effect.forEach(
+        directories.filter((directory): directory is string => directory !== undefined),
+        registerManaged,
+        { concurrency: 1, discard: true },
+      )
+      const rows = yield* db
+        .select()
+        .from(ManagedWorkspaceTable)
+        .orderBy(desc(ManagedWorkspaceTable.time_created), desc(ManagedWorkspaceTable.directory))
+        .all()
+        .pipe(Effect.orDie)
+      return yield* Effect.filter(rows, (row) => fs.isDir(row.directory)).pipe(
+        Effect.map((items) => items.map(managedWorkspaceFromRow)),
+      )
+    })
+
+    const createManaged = Effect.fn("Project.createManaged")(function* () {
+      const directory = path.join(Flag.OPENCODE_WORKSPACE_ROOT, crypto.randomUUID())
+      yield* fs.ensureDir(directory).pipe(Effect.orDie)
+      const result = yield* registerManaged(directory)
+      yield* emitManagedCreated(result)
+      return result
+    })
+
     const get = Effect.fn("Project.get")(function* (id: ProjectV2.ID) {
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, id)).get().pipe(Effect.orDie)
       return row ? fromRow(row) : undefined
@@ -481,6 +581,8 @@ export const layer = Layer.effect(
       fromDirectory,
       discover,
       list,
+      listManaged,
+      createManaged,
       get,
       update,
       initGit,

@@ -138,6 +138,8 @@ import type {
   ProjectInitGitResponses,
   ProjectListErrors,
   ProjectListResponses,
+  ProjectManagedErrors,
+  ProjectManagedResponses,
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   Prompt,
@@ -2548,6 +2550,36 @@ export class Project extends HeyApiClient {
     )
     return (options?.client ?? this.client).post<ProjectCreateResponses, ProjectCreateErrors, ThrowOnError>({
       url: "/project",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * List managed workspaces
+   *
+   * List shared workspace directories managed by this OpenCode server.
+   */
+  public managed<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProjectManagedResponses, ProjectManagedErrors, ThrowOnError>({
+      url: "/project/managed",
       ...options,
       ...params,
     })

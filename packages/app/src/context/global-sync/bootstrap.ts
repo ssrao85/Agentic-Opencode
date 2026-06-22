@@ -4,6 +4,7 @@ import type {
   Path,
   PermissionRequest,
   Project,
+  ManagedWorkspace,
   ProviderAuthResponse,
   QuestionRequest,
   Session,
@@ -26,6 +27,7 @@ type GlobalStore = {
   ready: boolean
   path: Path
   project: Project[]
+  managed_workspace: ManagedWorkspace[]
   session_todo: {
     [sessionID: string]: Todo[]
   }
@@ -105,6 +107,12 @@ export const loadProjectsQuery = (scope: ServerScope, sdk: OpencodeClient) =>
       ),
   })
 
+export const loadManagedWorkspacesQuery = (scope: ServerScope, sdk: OpencodeClient) =>
+  queryOptions({
+    queryKey: [scope, "managed_workspace"],
+    queryFn: () => retry(() => sdk.project.managed().then((x) => x.data ?? [])),
+  })
+
 export async function bootstrapGlobal(input: {
   serverSDK: OpencodeClient
   scope: ServerScope
@@ -122,6 +130,10 @@ export async function bootstrapGlobal(input: {
       input.queryClient
         .fetchQuery(loadProjectsQuery(input.scope, input.serverSDK))
         .then((data) => input.setGlobalStore("project", data)),
+    () =>
+      input.queryClient
+        .fetchQuery(loadManagedWorkspacesQuery(input.scope, input.serverSDK))
+        .then((data) => input.setGlobalStore("managed_workspace", data)),
   ]
   await runAll(slow)
   // showErrors({

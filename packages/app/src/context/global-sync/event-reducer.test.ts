@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import type { Message, Part, PermissionRequest, Project, QuestionRequest, Session } from "@opencode-ai/sdk/v2/client"
+import type {
+  ManagedWorkspace,
+  Message,
+  Part,
+  PermissionRequest,
+  Project,
+  QuestionRequest,
+  Session,
+} from "@opencode-ai/sdk/v2/client"
 import { createStore } from "solid-js/store"
 import type { State } from "./types"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
@@ -92,12 +100,14 @@ describe("applyGlobalEvent", () => {
     applyGlobalEvent({
       event: { type: "project.updated", properties: { id: "b" } },
       project,
+      managedWorkspace: [],
       refresh: () => {
         refreshCount += 1
       },
       setGlobalProject(next) {
         if (typeof next === "function") next(project)
       },
+      setManagedWorkspace() {},
     })
 
     expect(project.map((x) => x.id)).toEqual(["a", "b", "c"])
@@ -109,10 +119,12 @@ describe("applyGlobalEvent", () => {
     applyGlobalEvent({
       event: { type: "global.disposed" },
       project: [],
+      managedWorkspace: [],
       refresh: () => {
         refreshCount += 1
       },
       setGlobalProject() {},
+      setManagedWorkspace() {},
     })
 
     expect(refreshCount).toBe(1)
@@ -123,13 +135,38 @@ describe("applyGlobalEvent", () => {
     applyGlobalEvent({
       event: { type: "server.connected" },
       project: [],
+      managedWorkspace: [],
       refresh: () => {
         refreshCount += 1
       },
       setGlobalProject() {},
+      setManagedWorkspace() {},
     })
 
     expect(refreshCount).toBe(1)
+  })
+
+  test("adds a managed workspace created by another client", () => {
+    const managedWorkspace = [
+      { id: "existing", directory: "/all-workspaces/existing", time: { created: 1, updated: 1 } },
+    ] as ManagedWorkspace[]
+
+    applyGlobalEvent({
+      event: {
+        type: "managed.workspace.created",
+        properties: { id: "new", directory: "/all-workspaces/new", time: { created: 2, updated: 2 } },
+      },
+      project: [],
+      managedWorkspace,
+      refresh() {},
+      setGlobalProject() {},
+      setManagedWorkspace(next) {
+        if (typeof next !== "function") return
+        managedWorkspace.splice(0, managedWorkspace.length, ...next(managedWorkspace))
+      },
+    })
+
+    expect(managedWorkspace.map((item) => item.id)).toEqual(["new", "existing"])
   })
 })
 

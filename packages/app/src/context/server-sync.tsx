@@ -1,4 +1,12 @@
-import type { Config, OpencodeClient, Path, Project, ProviderAuthResponse, Todo } from "@opencode-ai/sdk/v2/client"
+import type {
+  Config,
+  ManagedWorkspace,
+  OpencodeClient,
+  Path,
+  Project,
+  ProviderAuthResponse,
+  Todo,
+} from "@opencode-ai/sdk/v2/client"
 import { showToast } from "@/utils/toast"
 import { getFilename } from "@opencode-ai/core/util/path"
 import { type Accessor, batch, createMemo, getOwner, onCleanup, onMount, untrack } from "solid-js"
@@ -43,6 +51,7 @@ type GlobalStore = {
   error?: InitError
   path: Path
   project: Project[]
+  managed_workspace: ManagedWorkspace[]
   session_todo: {
     [sessionID: string]: Todo[]
   }
@@ -117,6 +126,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       return !bootstrap.isPending
     },
     project: [],
+    managed_workspace: [],
     session_todo: {},
     provider_auth: {},
     get path() {
@@ -378,11 +388,13 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       applyGlobalEvent({
         event,
         project: globalStore.project,
+        managedWorkspace: globalStore.managed_workspace,
         refresh: () => {
           if (recent) return
           bootstrap.refetch()
         },
         setGlobalProject: setProjects,
+        setManagedWorkspace: (next) => setGlobalStore("managed_workspace", next),
       })
       if (event.type === "server.connected" || event.type === "global.disposed") {
         if (recent) return

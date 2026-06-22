@@ -164,14 +164,18 @@ const scenarios: Scenario[] = [
     .status(400),
   http.protected.get("/config/providers", "config.providers").json(),
   http.protected.get("/project", "project.list").json(200, array, "status"),
+  http.protected.get("/project/managed", "project.managed").json(200, array, "status"),
   http.protected
     .post("/project", "project.create")
     .mutating()
     .json(200, (body) => {
       object(body)
+      check(typeof body.id === "string", "project create should return a managed workspace id")
       check(typeof body.directory === "string", "project create should return a directory")
       check(path.dirname(body.directory) === exerciseWorkspaceRoot, "project should be created in the workspace root")
       check(path.basename(body.directory).length === 36, "project directory should use a UUID")
+      object(body.time)
+      check(typeof body.time.created === "number", "project create should return creation time")
     }),
   http.protected.get("/project/current", "project.current").json(
     200,
