@@ -2,22 +2,26 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { Context } from "effect"
 import path from "path"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
-import { FilePaths } from "../../src/server/routes/instance/httpapi/groups/file"
+import { FilePaths, MAX_FILE_UPLOAD_BYTES } from "../../src/server/routes/instance/httpapi/groups/file"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
 
 const context = Context.empty() as Context.Context<unknown>
 
-function request(route: string, directory: string, query?: Record<string, string>) {
+function request(route: string, directory: string, query?: Record<string, string>, init?: RequestInit) {
   const url = new URL(`http://localhost${route}`)
   for (const [key, value] of Object.entries(query ?? {})) {
     url.searchParams.set(key, value)
   }
+  const headers = new Headers(init?.headers)
+  headers.set("x-opencode-directory", directory)
+  if (init?.body !== undefined && !headers.has("content-type")) {
+    headers.set("content-type", "application/octet-stream")
+  }
   return HttpApiApp.webHandler().handler(
     new Request(url, {
-      headers: {
-        "x-opencode-directory": directory,
-      },
+      ...init,
+      headers,
     }),
     context,
   )
@@ -83,6 +87,63 @@ describe("file HttpApi", () => {
       expect(download.headers.get("content-type")).toContain(file.type)
       expect(new Uint8Array(await download.arrayBuffer())).toEqual(file.bytes)
     }
+  })
+
+  test("uploads arbitrary bytes into the active workspace", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const contents = new Uint8Array([80, 75, 3, 4, 0, 255])
+
+    const response = await request(
+      FilePaths.upload,
+      tmp.path,
+      { filename: "../unsafe\\archive.zip", mime: "application/zip" },
+      { method: "POST", body: contents },
+    )
+
+    expect(response.status).toBe(200)
+    const uploaded = (await response.json()) as { path: string; filename: string; mime: string; size: number }
+    expect(uploaded).toMatchObject({ filename: "archive.zip", mime: "application/zip", size: contents.byteLength })
+    expect(uploaded.path).toBe("archive.zip")
+    expect(new Uint8Array(await Bun.file(path.join(tmp.path, uploaded.path)).arrayBuffer())).toEqual(contents)
+
+    const replacement = Uint8Array.of(1, 2, 3)
+    const replaced = await request(
+      FilePaths.upload,
+      tmp.path,
+      { filename: "archive.zip", mime: "application/zip" },
+      { method: "POST", body: replacement },
+    )
+    expect(replaced.status).toBe(200)
+    expect(new Uint8Array(await Bun.file(path.join(tmp.path, "archive.zip")).arrayBuffer())).toEqual(replacement)
+
+    const empty = await request(FilePaths.upload, tmp.path, { filename: "empty.txt" }, { method: "POST", body: "" })
+    expect(empty.status).toBe(200)
+    const emptyUpload = (await empty.json()) as { path: string; size: number }
+    expect(emptyUpload.size).toBe(0)
+    expect((await Bun.file(path.join(tmp.path, emptyUpload.path)).arrayBuffer()).byteLength).toBe(0)
+  })
+
+  test("rejects oversized and escaping uploads", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await using outside = await tmpdir()
+
+    const oversized = await request(
+      FilePaths.upload,
+      tmp.path,
+      { filename: "large.bin" },
+      { method: "POST", body: new Uint8Array(MAX_FILE_UPLOAD_BYTES + 1) },
+    )
+    expect(oversized.status).toBe(400)
+
+    await Bun.$`ln -s ${path.join(outside.path, "escape.bin")} ${path.join(tmp.path, "escape.bin")}`
+    const escaping = await request(
+      FilePaths.upload,
+      tmp.path,
+      { filename: "escape.bin" },
+      { method: "POST", body: Uint8Array.of(1) },
+    )
+    expect(escaping.status).toBe(400)
+    expect(await Bun.file(path.join(outside.path, "escape.bin")).exists()).toBe(false)
   })
 
   test("serves search endpoints", async () => {

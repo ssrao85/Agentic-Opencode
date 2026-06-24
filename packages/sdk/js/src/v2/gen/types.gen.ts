@@ -2321,6 +2321,13 @@ export type FileContent = {
   mimeType?: string
 }
 
+export type FileUploadResult = {
+  path: string
+  filename: string
+  mime: string
+  size: number
+}
+
 export type File = {
   path: string
   added: number
@@ -6144,6 +6151,36 @@ export type FileDownloadResponses = {
 }
 
 export type FileDownloadResponse = FileDownloadResponses[keyof FileDownloadResponses]
+
+export type FileUploadData = {
+  body?: Blob | File
+  path?: never
+  query: {
+    directory?: string
+    workspace?: string
+    filename: string
+    mime?: string
+  }
+  url: "/file/upload"
+}
+
+export type FileUploadErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+}
+
+export type FileUploadError = FileUploadErrors[keyof FileUploadErrors]
+
+export type FileUploadResponses = {
+  /**
+   * Uploaded file
+   */
+  200: FileUploadResult
+}
+
+export type FileUploadResponse = FileUploadResponses[keyof FileUploadResponses]
 
 export type FileStatusData = {
   body?: never

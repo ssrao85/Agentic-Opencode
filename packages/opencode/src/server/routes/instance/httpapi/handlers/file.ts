@@ -9,13 +9,18 @@ import { Effect, Layer, Option } from "effect"
 import ignore from "ignore"
 import path from "path"
 import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
+import { MAX_FILE_UPLOAD_BYTES } from "../groups/file"
+import { EventV2Bridge } from "@/event-v2-bridge"
+import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 
 export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handlers) =>
   Effect.gen(function* () {
     const ripgrep = yield* Ripgrep.Service
     const locations = yield* LocationServiceMap
+    const raw = yield* FSUtil.Service
+    const events = yield* EventV2Bridge.Service
 
     const filesystem = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
       return yield* effect.pipe(
@@ -69,7 +74,6 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       return yield* filesystem(
         Effect.gen(function* () {
           const fs = yield* FileSystem.Service
-          const raw = yield* FSUtil.Service
           const location = yield* Location.Service
           const ignored = ignore()
           const gitignore = yield* raw
@@ -138,6 +142,34 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       return HttpServerResponse.uint8Array(item.content, { contentType: item.mime })
     })
 
+    const upload = Effect.fn("FileHttpApi.upload")(function* (ctx: {
+      query: { filename: string; mime?: string }
+      payload: Uint8Array
+    }) {
+      if (ctx.payload.byteLength > MAX_FILE_UPLOAD_BYTES) {
+        return yield* new HttpApiError.BadRequest({})
+      }
+
+      const directory = (yield* InstanceState.context).directory
+      const root = yield* raw.realPath(directory).pipe(Effect.orDie)
+      const filename = uploadFilename(ctx.query.filename)
+      const target = path.join(root, filename)
+      if (Option.isSome(yield* raw.readLink(target).pipe(Effect.option))) {
+        return yield* new HttpApiError.BadRequest({})
+      }
+      const exists = yield* raw.existsSafe(target)
+      yield* raw.writeWithDirs(target, ctx.payload).pipe(Effect.orDie)
+      yield* events.publish(FileSystem.Event.Edited, { file: target })
+      yield* events.publish(Watcher.Event.Updated, { file: target, event: exists ? "change" : "add" })
+
+      return {
+        path: filename,
+        filename,
+        mime: uploadMime(ctx.query.mime, filename),
+        size: ctx.payload.byteLength,
+      }
+    })
+
     const status = Effect.fn("FileHttpApi.status")(function* () {
       return []
     })
@@ -149,6 +181,20 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       .handle("list", list)
       .handle("content", content)
       .handleRaw("download", download)
+      .handle("upload", upload)
       .handle("status", status)
   }),
 ).pipe(Layer.provide(LocationServiceMap.layer))
+
+function uploadFilename(input: string) {
+  const base = path.win32.basename(path.posix.basename(input))
+  const clean = base
+    .replace(/[\u0000-\u001f<>:"/\\|?*]/g, "_")
+    .replace(/[. ]+$/, "")
+    .trim()
+  return clean.slice(0, 200) || "attachment"
+}
+
+function uploadMime(input: string | undefined, filename: string) {
+  return input?.split(";", 1)[0]?.trim().toLowerCase() || FSUtil.mimeType(filename)
+}

@@ -68,6 +68,8 @@ import type {
   FileReadResponses,
   FileStatusErrors,
   FileStatusResponses,
+  FileUploadErrors,
+  FileUploadResponses,
   FindFilesErrors,
   FindFilesResponses,
   FindSymbolsErrors,
@@ -1855,6 +1857,48 @@ export class File extends HeyApiClient {
       url: "/file/download",
       ...options,
       ...params,
+    })
+  }
+
+  /**
+   * Upload file
+   *
+   * Upload a file into the current workspace and return its workspace-relative path.
+   */
+  public upload<ThrowOnError extends boolean = false>(
+    parameters: {
+      directory?: string
+      workspace?: string
+      filename: string
+      mime?: string
+      body?: Blob | File
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "query", key: "filename" },
+            { in: "query", key: "mime" },
+            { key: "body", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<FileUploadResponses, FileUploadErrors, ThrowOnError>({
+      bodySerializer: null,
+      url: "/file/upload",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/octet-stream",
+        ...options?.headers,
+        ...params.headers,
+      },
     })
   }
 

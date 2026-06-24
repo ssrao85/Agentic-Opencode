@@ -2,7 +2,7 @@ import { FileSystem } from "@opencode-ai/core/filesystem"
 import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { LSP } from "@/lsp/lsp"
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import {
@@ -16,6 +16,21 @@ export const FileQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   path: Schema.String,
 })
+
+export const FileUploadQuery = Schema.Struct({
+  ...WorkspaceRoutingQueryFields,
+  filename: Schema.String,
+  mime: Schema.optional(Schema.String),
+})
+
+export const FileUploadResult = Schema.Struct({
+  path: Schema.String,
+  filename: Schema.String,
+  mime: Schema.String,
+  size: NonNegativeInt,
+}).annotate({ identifier: "FileUploadResult" })
+
+export const MAX_FILE_UPLOAD_BYTES = 20 * 1024 * 1024
 
 export const FindTextQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
@@ -99,6 +114,7 @@ export const FilePaths = {
   list: "/file",
   content: "/file/content",
   download: "/file/download",
+  upload: "/file/upload",
   status: "/file/status",
 } as const
 
@@ -164,6 +180,18 @@ export const FileApi = HttpApi.make("file")
             identifier: "file.download",
             summary: "Download file",
             description: "Download a file from the project without modifying its contents.",
+          }),
+        ),
+        HttpApiEndpoint.post("upload", FilePaths.upload, {
+          query: FileUploadQuery,
+          payload: Schema.Uint8Array.pipe(HttpApiSchema.asUint8Array({ contentType: "application/octet-stream" })),
+          success: described(FileUploadResult, "Uploaded file"),
+          error: HttpApiError.BadRequest,
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "file.upload",
+            summary: "Upload file",
+            description: "Upload a file into the current workspace and return its workspace-relative path.",
           }),
         ),
         HttpApiEndpoint.get("status", FilePaths.status, {

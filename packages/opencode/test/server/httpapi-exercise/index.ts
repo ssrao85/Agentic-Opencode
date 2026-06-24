@@ -367,6 +367,20 @@ const scenarios: Scenario[] = [
         }),
       "status",
     ),
+  http.protected
+    .post("/file/upload", "file.upload")
+    .mutating()
+    .at((ctx) => ({
+      path: `/file/upload?${new URLSearchParams({ filename: "exercise.bin", mime: "application/octet-stream" })}`,
+      headers: ctx.headers({ "content-type": "application/octet-stream" }),
+      body: "upload",
+    }))
+    .json(200, (body) => {
+      object(body)
+      check(body.path === "exercise.bin", "upload should return the workspace-root filename")
+      check(body.filename === "exercise.bin", "upload should preserve a safe filename")
+      check(body.mime === "application/octet-stream", "upload should preserve the supplied MIME type")
+    }),
   http.protected.get("/file/status", "file.status").json(200, array),
   http.protected
     .get("/find", "find.text")

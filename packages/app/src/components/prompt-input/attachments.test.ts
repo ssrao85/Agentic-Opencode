@@ -18,20 +18,25 @@ describe("attachmentMime", () => {
     expect(await attachmentMime(file)).toBe("text/plain")
   })
 
-  test("rejects binary files", async () => {
+  test("uses a generic MIME type for unknown binary files", async () => {
     const file = new File([Uint8Array.of(0, 255, 1, 2)], "blob.bin", { type: "application/octet-stream" })
-    expect(await attachmentMime(file)).toBeUndefined()
+    expect(await attachmentMime(file)).toBe("application/octet-stream")
   })
 })
 
 describe("pickAttachmentFiles", () => {
   test("reads the current project directory for every native picker invocation", async () => {
     const paths: string[] = []
+    const accepted: Array<string[] | undefined> = []
     const files: File[] = []
     const file = new File(["hello"], "hello.txt", { type: "text/plain" })
     let directory = "C:\\Projects\\LoremIpsum"
-    const picker = async (options?: { defaultPath?: string }, onFile?: (file: File) => Promise<unknown>) => {
+    const picker = async (
+      options?: { defaultPath?: string; accept?: string[] },
+      onFile?: (file: File) => Promise<unknown>,
+    ) => {
       paths.push(options?.defaultPath ?? "")
+      accepted.push(options?.accept)
       await onFile?.(file)
     }
 
@@ -54,6 +59,7 @@ describe("pickAttachmentFiles", () => {
     await Promise.resolve()
     expect(files).toEqual([file, file])
     expect(paths).toEqual(["C:\\Projects\\LoremIpsum", "C:\\Projects\\DolorSit"])
+    expect(accepted).toEqual([undefined, undefined])
   })
 
   test("uses the browser file input when no native picker exists", async () => {

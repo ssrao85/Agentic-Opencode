@@ -33,39 +33,41 @@ type PromptAttachmentsInput = {
   focusEditor: () => void
   addPart: (part: ContentPart) => boolean
   readClipboardImage?: () => Promise<File | null>
-  getPathForFile?: (file: File) => string
+  upload: (file: File, mime: string) => Promise<{ directory: string; path: string; filename: string; mime: string }>
 }
 
 export function createPromptAttachments(input: PromptAttachmentsInput) {
   const prompt = input.prompt
   const language = useLanguage()
 
-  const warn = () => {
+  const failed = (error: unknown) => {
     showToast({
-      title: language.t("prompt.toast.pasteUnsupported.title"),
-      description: language.t("prompt.toast.pasteUnsupported.description"),
+      variant: "error",
+      title: language.t("common.requestFailed"),
+      description: error instanceof Error ? error.message : String(error),
     })
   }
 
   const add = async (file: File, toast = true) => {
-    const mime = await attachmentMime(file)
-    if (!mime) {
-      if (toast) warn()
-      return false
-    }
-
     const editor = input.editor()
     if (!editor) return false
 
-    const url = await dataUrl(file, mime)
-    if (!url) return false
+    const mime = await attachmentMime(file)
+    const uploaded = await input.upload(file, mime).catch((error) => {
+      if (toast) failed(error)
+      return undefined
+    })
+    if (!uploaded) return false
+
+    const url = mime.startsWith("image/") ? await dataUrl(file, mime) : ""
 
     const attachment: ImageAttachmentPart = {
       type: "image",
       id: uuid(),
-      filename: file.name,
-      sourcePath: input.getPathForFile?.(file) || undefined,
-      mime,
+      filename: uploaded.filename,
+      directory: uploaded.directory,
+      path: uploaded.path,
+      mime: uploaded.mime,
       dataUrl: url,
     }
     const cursor = prompt.cursor() ?? getCursorPosition(editor)
@@ -77,13 +79,20 @@ export function createPromptAttachments(input: PromptAttachmentsInput) {
 
   const addAttachments = async (files: File[], toast = true) => {
     let found = false
+    let rejected = false
 
     for (const file of files) {
       const ok = await add(file, false)
       if (ok) found = true
+      if (!ok) rejected = true
     }
 
-    if (!found && files.length > 0 && toast) warn()
+    if (rejected && files.length > 0 && toast) {
+      showToast({
+        variant: "error",
+        title: language.t("common.requestFailed"),
+      })
+    }
     return found
   }
 

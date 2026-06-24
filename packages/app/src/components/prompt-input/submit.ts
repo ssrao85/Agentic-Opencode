@@ -17,7 +17,12 @@ import { useSDK, type DirectorySDK } from "@/context/sdk"
 import { useSync, type DirectorySync } from "@/context/sync"
 import { Identifier } from "@/utils/id"
 import { Worktree as WorktreeState } from "@/utils/worktree"
-import { buildRequestParts } from "./build-request-parts"
+import {
+  appendUploadedFileNotes,
+  attachmentUrl,
+  buildRequestParts,
+  supportsModelAttachment,
+} from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
@@ -87,15 +92,15 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       await input.client.session.command({
         sessionID: input.draft.sessionID,
         command: cmd,
-        arguments: tail.join(" "),
+        arguments: appendUploadedFileNotes(tail.join(" "), images, input.draft.sessionDirectory),
         agent: input.draft.agent,
         model: `${input.draft.model.providerID}/${input.draft.model.modelID}`,
         variant: input.draft.variant,
-        parts: images.map((attachment) => ({
+        parts: images.filter(supportsModelAttachment).map((attachment) => ({
           id: Identifier.ascending("part"),
           type: "file" as const,
           mime: attachment.mime,
-          url: attachment.dataUrl,
+          url: attachmentUrl(attachment, input.draft.sessionDirectory),
           filename: attachment.filename,
         })),
       })
@@ -478,15 +483,15 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           .command({
             sessionID: session.id,
             command: commandName,
-            arguments: args.join(" "),
+            arguments: appendUploadedFileNotes(args.join(" "), images, sessionDirectory),
             agent,
             model: `${model.providerID}/${model.modelID}`,
             variant,
-            parts: images.map((attachment) => ({
+            parts: images.filter(supportsModelAttachment).map((attachment) => ({
               id: Identifier.ascending("part"),
               type: "file" as const,
               mime: attachment.mime,
-              url: attachment.dataUrl,
+              url: attachmentUrl(attachment, sessionDirectory),
               filename: attachment.filename,
             })),
           })

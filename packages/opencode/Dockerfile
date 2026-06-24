@@ -1,3 +1,6 @@
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.11.23
+FROM ${UV_IMAGE} AS uv
+
 FROM alpine:3.22 AS base
 
 ARG BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
@@ -28,6 +31,9 @@ RUN apk add --no-cache \
     gd-dev \
     zlib-dev
 
+# Install uv and uvx from the official uv image
+COPY --from=uv /uv /uvx /usr/local/bin/
+
 # Optional: make `python` command available too
 RUN ln -sf /usr/bin/python3 /usr/local/bin/python
 
@@ -39,9 +45,14 @@ RUN python3 -m venv ${VIRTUAL_ENV}
 
 COPY requirements.txt /tmp/requirements.txt
 
-RUN pip install --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -r /tmp/requirements.txt \
+RUN uv pip install --python ${VIRTUAL_ENV}/bin/python --upgrade pip setuptools wheel \
+    && uv pip install --python ${VIRTUAL_ENV}/bin/python --no-cache -r /tmp/requirements.txt \
     && rm /tmp/requirements.txt
+
+# Allow OpenShift arbitrary UID users, usually in group 0, to write to the venv
+RUN chgrp -R 0 ${VIRTUAL_ENV} \
+    && chmod -R g=u ${VIRTUAL_ENV} \
+    && find ${VIRTUAL_ENV} -type d -exec chmod g+s {} +
 
 # Build libpst/readpst from source because Alpine does not provide Debian's pst-utils package
 ARG LIBPST_TAG=libpst-0.6.76
@@ -77,6 +88,7 @@ RUN opencode --version \
     && python3 --version \
     && python --version \
     && pip --version \
+    && uv --version \
     && node --version \
     && npm --version \
     && readpst -V

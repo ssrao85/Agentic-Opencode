@@ -75,6 +75,66 @@ describe("buildRequestParts", () => {
     expect(files.map((part) => (part.type === "file" ? part.filename : ""))).toEqual(["a.png", "b.pdf"])
   })
 
+  test("adds unsupported uploads to chat text without sending provider media", () => {
+    const result = buildRequestParts({
+      prompt: [],
+      context: [],
+      images: [
+        {
+          type: "image",
+          id: "upload_1",
+          filename: "archive.zip",
+          directory: "/all-workspaces/workspace-a",
+          path: "archive.zip",
+          mime: "application/zip",
+          dataUrl: "",
+        },
+      ],
+      text: "inspect this",
+      messageID: "msg_upload",
+      sessionID: "ses_upload",
+      sessionDirectory: "/all-workspaces/worktree-b",
+    })
+
+    expect(result.requestParts[0]).toMatchObject({
+      type: "text",
+      text: "inspect this\n\nNew uploaded file: /all-workspaces/workspace-a/archive.zip",
+    })
+    expect(result.requestParts.some((part) => part.type === "file" && part.mime === "application/zip")).toBe(false)
+  })
+
+  test("adds persisted text uploads to chat text and model context", () => {
+    const result = buildRequestParts({
+      prompt: [],
+      context: [],
+      images: [
+        {
+          type: "image",
+          id: "upload_text",
+          filename: "notes.md",
+          directory: "/all-workspaces/workspace-a",
+          path: "notes.md",
+          mime: "text/plain",
+          dataUrl: "",
+        },
+      ],
+      text: "summarize",
+      messageID: "msg_text_upload",
+      sessionID: "ses_text_upload",
+      sessionDirectory: "/all-workspaces/workspace-a",
+    })
+
+    expect(result.requestParts[0]).toMatchObject({
+      type: "text",
+      text: "summarize\n\nNew uploaded file: /all-workspaces/workspace-a/notes.md",
+    })
+    expect(result.requestParts.find((part) => part.type === "file")).toMatchObject({
+      mime: "text/plain",
+      filename: "notes.md",
+      url: "file:///all-workspaces/workspace-a/notes.md",
+    })
+  })
+
   test("preserves an external attachment source path for the model", () => {
     const result = buildRequestParts({
       prompt: [],

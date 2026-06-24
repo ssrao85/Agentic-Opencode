@@ -32,7 +32,7 @@ bun install
 
 docker build \
   -f packages/opencode/Dockerfile \
-  -t opencode-local-2 \
+  -t opencode-local-9 \
   packages/opencode
 
 ```

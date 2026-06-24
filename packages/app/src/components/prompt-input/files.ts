@@ -27,7 +27,7 @@ export function pickAttachmentFiles(input: {
       {
         defaultPath: input.directory(),
         multiple: true,
-        accept: ACCEPTED_FILE_TYPES,
+        accept: ACCEPTED_FILE_TYPES.length > 0 ? ACCEPTED_FILE_TYPES : undefined,
       },
       input.onFile,
     )
@@ -93,6 +93,6 @@ export async function attachmentMime(file: File) {
 
   if (textMime(type)) return "text/plain"
   const bytes = new Uint8Array(await file.slice(0, SAMPLE).arrayBuffer())
-  if (!textBytes(bytes)) return
+  if (!textBytes(bytes)) return type || "application/octet-stream"
   return "text/plain"
 }

@@ -36,6 +36,27 @@ const absolute = (directory: string, path: string) => {
   return `${directory.replace(/[\\/]+$/, "")}/${path}`
 }
 
+export function attachmentUrl(attachment: ImageAttachmentPart, directory: string) {
+  if (!attachment.path) return attachment.dataUrl
+  return `file://${encodeFilePath(absolute(attachment.directory ?? directory, attachment.path))}`
+}
+
+export function appendUploadedFileNotes(text: string, attachments: ImageAttachmentPart[], directory: string) {
+  const notes = attachments.flatMap((attachment) => {
+    if (!attachment.path) return []
+    const note = `New uploaded file: ${absolute(attachment.directory ?? directory, attachment.path)}`
+    return text.includes(note) ? [] : [note]
+  })
+  if (notes.length === 0) return text
+  return [text.trimEnd(), notes.join("\n")].filter(Boolean).join("\n\n")
+}
+
+export function supportsModelAttachment(attachment: ImageAttachmentPart) {
+  return (
+    attachment.mime === "text/plain" || attachment.mime === "application/pdf" || attachment.mime.startsWith("image/")
+  )
+}
+
 const fileQuery = (selection: FileSelection | undefined) =>
   selection ? `?start=${selection.startLine}&end=${selection.endLine}` : ""
 
@@ -93,7 +114,7 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
     {
       id: Identifier.ascending("part"),
       type: "text",
-      text: input.text,
+      text: appendUploadedFileNotes(input.text, input.images, input.sessionDirectory),
     },
   ]
 
@@ -182,13 +203,13 @@ export function buildRequestParts(input: BuildRequestPartsInput) {
     ]
   })
 
-  const images = input.images.map((attachment) => {
+  const images = input.images.filter(supportsModelAttachment).map((attachment) => {
     return {
       id: Identifier.ascending("part"),
       type: "file",
       mime: attachment.mime,
-      url: attachment.dataUrl,
-      filename: attachment.sourcePath ?? attachment.filename,
+      url: attachmentUrl(attachment, input.sessionDirectory),
+      filename: attachment.path ? attachment.filename : (attachment.sourcePath ?? attachment.filename),
     } satisfies PromptRequestPart
   })
 

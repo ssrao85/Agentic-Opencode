@@ -1157,7 +1157,14 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     },
     addPart,
     readClipboardImage: platform.readClipboardImage,
-    getPathForFile: platform.getPathForFile,
+    upload: async (file, mime) => {
+      const current = sdk()
+      const uploaded = await current.client.file
+        .upload({ filename: file.name, mime: mime === "application/octet-stream" ? undefined : mime, body: file })
+        .then((result) => result.data)
+      if (!uploaded) throw new Error(language.t("common.requestFailed"))
+      return { ...uploaded, directory: current.directory }
+    },
   })
 
   const fileAttachmentInput = () => (
@@ -1165,7 +1172,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
       ref={(el) => (fileInputRef = el)}
       type="file"
       multiple
-      accept={ACCEPTED_FILE_TYPES.join(",")}
+      accept={ACCEPTED_FILE_TYPES.join(",") || undefined}
       class="hidden"
       onChange={(e) => {
         const list = e.currentTarget.files
@@ -1793,7 +1800,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept={ACCEPTED_FILE_TYPES.join(",")}
+                  accept={ACCEPTED_FILE_TYPES.join(",") || undefined}
                   class="hidden"
                   onChange={(e) => {
                     const list = e.currentTarget.files

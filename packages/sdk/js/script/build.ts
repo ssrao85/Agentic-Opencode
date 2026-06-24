@@ -58,6 +58,21 @@ if (sseTypesPatched === sseTypesSource) {
 }
 await Bun.write(sseTypesPath, sseTypesPatched)
 
+// Patch a @hey-api/openapi-ts codegen bug: flat binary bodies are File/Blob
+// instances, but stripEmptySlots treats every object with no enumerable keys
+// as an empty parameter map and deletes the body before creating the Request.
+const paramsPath = "./src/v2/gen/core/params.gen.ts"
+const paramsFile = Bun.file(paramsPath)
+const paramsSource = await paramsFile.text()
+const paramsPatched = paramsSource.replace(
+  /if \(value && typeof value === ["']object["'] && !Object\.keys\(value\)\.length\) \{/,
+  'if (value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype && !Object.keys(value).length) {',
+)
+if (paramsPatched === paramsSource) {
+  throw new Error(`Binary body patch did not apply; @hey-api/openapi-ts output may have changed (${paramsPath})`)
+}
+await Bun.write(paramsPath, paramsPatched)
+
 await $`bun prettier --write src/gen`
 await $`bun prettier --write src/v2`
 await $`rm -rf dist`

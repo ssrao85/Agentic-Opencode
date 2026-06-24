@@ -26,7 +26,7 @@ export const PromptImageAttachments: Component<PromptImageAttachmentsProps> = (p
             <Tooltip value={attachment.filename} placement="top" contentClass="break-all">
               <div class="relative group">
                 <Show
-                  when={attachment.mime.startsWith("image/")}
+                  when={attachment.mime.startsWith("image/") && attachment.dataUrl}
                   fallback={
                     <div class={fallbackClass}>
                       <Icon name="folder" class="size-6 text-text-weak" />
