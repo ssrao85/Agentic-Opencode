@@ -27,6 +27,15 @@ type ManagedWorkspace = {
   time: { created: number; updated: number }
 }
 
+type ManagedWorkspaceRoot = {
+  directory: string
+}
+
+type SessionInfo = {
+  id: string
+  directory: string
+}
+
 function json<T>(response: HttpClientResponse.HttpClientResponse) {
   return response.json.pipe(Effect.map((value) => value as T))
 }
@@ -60,6 +69,10 @@ describe("managed project workspaces", () => {
       )
       yield* fs.ensureDir(existing)
 
+      const rootResponse = yield* requestInDirectory("/project/managed/root", test.directory)
+      expect(rootResponse.status).toBe(200)
+      expect((yield* json<ManagedWorkspaceRoot>(rootResponse)).directory).toBe(root)
+
       const initial = yield* requestInDirectory("/project/managed", test.directory)
       expect(initial.status).toBe(200)
       expect((yield* json<ManagedWorkspace[]>(initial)).map((item) => item.directory)).toEqual([existing])
@@ -71,6 +84,11 @@ describe("managed project workspaces", () => {
       expect(path.dirname(created.directory)).toBe(root)
       expect(yield* fs.isDir(created.directory)).toBe(true)
 
+      const sessionResponse = yield* requestInDirectory("/session", created.directory, { method: "POST" })
+      expect(sessionResponse.status).toBe(200)
+      const session = yield* json<SessionInfo>(sessionResponse)
+      expect(session.directory).toBe(created.directory)
+
       const listed = yield* requestInDirectory("/project/managed", test.directory)
       expect((yield* json<ManagedWorkspace[]>(listed)).map((item) => item.directory)).toEqual([
         created.directory,
@@ -81,6 +99,34 @@ describe("managed project workspaces", () => {
           (event) =>
             event.directory === "global" &&
             event.payload.type === "managed.workspace.created" &&
+            event.payload.properties.directory === created.directory,
+        ),
+      ).toBe(true)
+
+      const deleteResponse = yield* requestInDirectory(`/project/managed/${created.id}`, created.directory, {
+        method: "DELETE",
+      })
+      expect(deleteResponse.status).toBe(200)
+      const deleted = yield* json<ManagedWorkspace>(deleteResponse)
+      expect(deleted.id).toBe(created.id)
+      expect(deleted.directory).toBe(created.directory)
+      expect(yield* fs.isDir(created.directory)).toBe(false)
+
+      const afterDelete = yield* requestInDirectory("/project/managed", test.directory)
+      expect((yield* json<ManagedWorkspace[]>(afterDelete)).map((item) => item.directory)).toEqual([existing])
+
+      const sessionsAfterDelete = yield* requestInDirectory(
+        `/session?directory=${encodeURIComponent(created.directory)}`,
+        test.directory,
+      )
+      expect(sessionsAfterDelete.status).toBe(200)
+      expect((yield* json<SessionInfo[]>(sessionsAfterDelete)).map((item) => item.id)).not.toContain(session.id)
+
+      expect(
+        events.seen.some(
+          (event) =>
+            event.directory === "global" &&
+            event.payload.type === "managed.workspace.deleted" &&
             event.payload.properties.directory === created.directory,
         ),
       ).toBe(true)

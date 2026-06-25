@@ -55,6 +55,11 @@ export const ManagedWorkspace = Schema.Struct({
 }).annotate({ identifier: "ManagedWorkspace" })
 export type ManagedWorkspace = Schema.Schema.Type<typeof ManagedWorkspace>
 
+export const ManagedWorkspaceRoot = Schema.Struct({
+  directory: Schema.String,
+}).annotate({ identifier: "ManagedWorkspaceRoot" })
+export type ManagedWorkspaceRoot = Schema.Schema.Type<typeof ManagedWorkspaceRoot>
+
 export const Info = Schema.Struct({
   id: ProjectV2.ID,
   worktree: Schema.String,
@@ -73,6 +78,7 @@ export const Event = {
 
 export const ManagedWorkspaceEvent = {
   Created: EventV2.define({ type: "managed.workspace.created", schema: ManagedWorkspace.fields }),
+  Deleted: EventV2.define({ type: "managed.workspace.deleted", schema: ManagedWorkspace.fields }),
 }
 
 type Row = typeof ProjectTable.$inferSelect
@@ -134,6 +140,22 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Pro
   projectID: ProjectV2.ID,
 }) {}
 
+export class ManagedWorkspaceNotFoundError extends Schema.TaggedErrorClass<ManagedWorkspaceNotFoundError>()(
+  "Project.ManagedWorkspaceNotFoundError",
+  {
+    workspaceID: Schema.String,
+  },
+) {}
+
+export class ManagedWorkspaceUnsafePathError extends Schema.TaggedErrorClass<ManagedWorkspaceUnsafePathError>()(
+  "Project.ManagedWorkspaceUnsafePathError",
+  {
+    workspaceID: Schema.String,
+    directory: Schema.String,
+    root: Schema.String,
+  },
+) {}
+
 // ---------------------------------------------------------------------------
 // Effect service
 // ---------------------------------------------------------------------------
@@ -148,8 +170,13 @@ export interface Interface {
   readonly fromDirectory: (directory: string) => Effect.Effect<{ project: Info; sandbox: string }>
   readonly discover: (input: Info) => Effect.Effect<void>
   readonly list: () => Effect.Effect<Info[]>
+  readonly managedRoot: () => Effect.Effect<ManagedWorkspaceRoot>
   readonly listManaged: () => Effect.Effect<ManagedWorkspace[]>
   readonly createManaged: () => Effect.Effect<ManagedWorkspace>
+  readonly getManaged: (workspaceID: string) => Effect.Effect<ManagedWorkspace | undefined>
+  readonly deleteManaged: (
+    workspaceID: string,
+  ) => Effect.Effect<ManagedWorkspace, ManagedWorkspaceNotFoundError | ManagedWorkspaceUnsafePathError>
   readonly get: (id: ProjectV2.ID) => Effect.Effect<Info | undefined>
   readonly update: (input: UpdateInput) => Effect.Effect<Info, NotFoundError>
   readonly initGit: (input: { directory: string; project: Info }) => Effect.Effect<Info>
@@ -205,6 +232,14 @@ export const layer = Layer.effect(
         GlobalBus.emit("event", {
           directory: "global",
           payload: { type: ManagedWorkspaceEvent.Created.type, properties: data },
+        }),
+      )
+
+    const emitManagedDeleted = (data: ManagedWorkspace) =>
+      Effect.sync(() =>
+        GlobalBus.emit("event", {
+          directory: "global",
+          payload: { type: ManagedWorkspaceEvent.Deleted.type, properties: data },
         }),
       )
 
@@ -406,6 +441,10 @@ export const layer = Layer.effect(
       return (yield* db.select().from(ProjectTable).all().pipe(Effect.orDie)).map(fromRow)
     })
 
+    const managedRoot = Effect.fn("Project.managedRoot")(function* () {
+      return { directory: FSUtil.resolve(Flag.OPENCODE_WORKSPACE_ROOT) }
+    })
+
     const registerManaged = Effect.fn("Project.registerManaged")(function* (directory: string) {
       const now = Date.now()
       const row = yield* db
@@ -464,6 +503,32 @@ export const layer = Layer.effect(
       const result = yield* registerManaged(directory)
       yield* emitManagedCreated(result)
       return result
+    })
+
+    const getManaged = Effect.fn("Project.getManaged")(function* (workspaceID: string) {
+      const row = yield* db
+        .select()
+        .from(ManagedWorkspaceTable)
+        .where(eq(ManagedWorkspaceTable.id, workspaceID))
+        .get()
+        .pipe(Effect.orDie)
+      return row ? managedWorkspaceFromRow(row) : undefined
+    })
+
+    const deleteManaged = Effect.fn("Project.deleteManaged")(function* (workspaceID: string) {
+      const workspace = yield* getManaged(workspaceID)
+      if (!workspace) return yield* new ManagedWorkspaceNotFoundError({ workspaceID })
+
+      const root = FSUtil.resolve(Flag.OPENCODE_WORKSPACE_ROOT)
+      const directory = FSUtil.resolve(workspace.directory)
+      if (path.dirname(directory) !== root || path.basename(directory).length === 0) {
+        return yield* new ManagedWorkspaceUnsafePathError({ workspaceID, directory, root })
+      }
+
+      yield* fs.remove(directory, { recursive: true, force: true }).pipe(Effect.orDie)
+      yield* db.delete(ManagedWorkspaceTable).where(eq(ManagedWorkspaceTable.id, workspaceID)).run().pipe(Effect.orDie)
+      yield* emitManagedDeleted(workspace)
+      return workspace
     })
 
     const get = Effect.fn("Project.get")(function* (id: ProjectV2.ID) {
@@ -581,8 +646,11 @@ export const layer = Layer.effect(
       fromDirectory,
       discover,
       list,
+      managedRoot,
       listManaged,
       createManaged,
+      getManaged,
+      deleteManaged,
       get,
       update,
       initGit,

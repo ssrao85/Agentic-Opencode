@@ -1,16 +1,18 @@
 import * as InstanceState from "@/effect/instance-state"
 import { Project } from "@/project/project"
+import { Session } from "@/session/session"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { ProjectNotFoundError } from "../errors"
+import { notFound, ProjectNotFoundError } from "../errors"
 import { markInstanceForReload } from "../lifecycle"
 
 export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", (handlers) =>
   Effect.gen(function* () {
     const svc = yield* Project.Service
     const project = yield* ProjectV2.Service
+    const session = yield* Session.Service
 
     const list = Effect.fn("ProjectHttpApi.list")(function* () {
       return yield* svc.list()
@@ -22,6 +24,35 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
 
     const managed = Effect.fn("ProjectHttpApi.managed")(function* () {
       return yield* svc.listManaged()
+    })
+
+    const managedRoot = Effect.fn("ProjectHttpApi.managedRoot")(function* () {
+      return yield* svc.managedRoot()
+    })
+
+    const deleteManaged = Effect.fn("ProjectHttpApi.deleteManaged")(function* (ctx: {
+      params: { workspaceID: string }
+    }) {
+      const workspace = yield* svc.getManaged(ctx.params.workspaceID)
+      if (!workspace) return yield* Effect.fail(notFound(`Managed workspace not found: ${ctx.params.workspaceID}`))
+
+      const sessions = yield* session.listGlobal({
+        directory: workspace.directory,
+        archived: true,
+        roots: true,
+        limit: Number.MAX_SAFE_INTEGER,
+      })
+      yield* Effect.forEach(sessions, (item) => session.remove(item.id).pipe(Effect.catch(() => Effect.void)), {
+        concurrency: 1,
+        discard: true,
+      })
+
+      return yield* svc.deleteManaged(ctx.params.workspaceID).pipe(
+        Effect.catchTag("Project.ManagedWorkspaceNotFoundError", (error) =>
+          Effect.fail(notFound(`Managed workspace not found: ${error.workspaceID}`)),
+        ),
+        Effect.catchTag("Project.ManagedWorkspaceUnsafePathError", () => Effect.fail(new HttpApiError.BadRequest({}))),
+      )
     })
 
     const current = Effect.fn("ProjectHttpApi.current")(function* () {
@@ -65,6 +96,8 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
       .handle("list", list)
       .handle("create", create)
       .handle("managed", managed)
+      .handle("managedRoot", managedRoot)
+      .handle("deleteManaged", deleteManaged)
       .handle("current", current)
       .handle("initGit", initGit)
       .handle("update", update)

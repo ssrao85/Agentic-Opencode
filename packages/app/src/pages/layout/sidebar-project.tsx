@@ -27,7 +27,9 @@ export type ProjectSidebarContext = {
   openSidebar: () => void
   closeProject: (directory: string) => void
   showEditProjectDialog: (project: LocalProject) => void
+  showDeleteManagedWorkspaceDialog: (project: LocalProject) => void
   toggleProjectWorkspaces: (project: LocalProject) => void
+  canDeleteProject: (project: LocalProject) => boolean
   workspacesEnabled: (project: LocalProject) => boolean
   workspaceIds: (project: LocalProject) => string[]
   workspaceLabel: (directory: string, branch?: string, projectId?: string) => string
@@ -65,7 +67,9 @@ const ProjectTile = (props: {
   onProjectFocus: (worktree: string) => void
   navigateToProject: (directory: string) => void
   showEditProjectDialog: (project: LocalProject) => void
+  showDeleteManagedWorkspaceDialog: (project: LocalProject) => void
   toggleProjectWorkspaces: (project: LocalProject) => void
+  canDeleteProject: (project: LocalProject) => boolean
   workspacesEnabled: (project: LocalProject) => boolean
   closeProject: (directory: string) => void
   setMenu: (value: boolean) => void
@@ -172,6 +176,14 @@ const ProjectTile = (props: {
             <ContextMenu.ItemLabel>{props.language.t("sidebar.project.clearNotifications")}</ContextMenu.ItemLabel>
           </ContextMenu.Item>
           <ContextMenu.Separator />
+          <ContextMenu.Item
+            data-action="project-delete-menu"
+            data-project={base64Encode(props.project.worktree)}
+            disabled={!props.canDeleteProject(props.project)}
+            onSelect={() => props.showDeleteManagedWorkspaceDialog(props.project)}
+          >
+            <ContextMenu.ItemLabel>{props.language.t("common.delete")}</ContextMenu.ItemLabel>
+          </ContextMenu.Item>
           <ContextMenu.Item
             data-action="project-close-menu"
             data-project={base64Encode(props.project.worktree)}
@@ -329,7 +341,9 @@ export const SortableProject = (props: {
       onProjectFocus={props.ctx.onProjectFocus}
       navigateToProject={props.ctx.navigateToProject}
       showEditProjectDialog={props.ctx.showEditProjectDialog}
+      showDeleteManagedWorkspaceDialog={props.ctx.showDeleteManagedWorkspaceDialog}
       toggleProjectWorkspaces={props.ctx.toggleProjectWorkspaces}
+      canDeleteProject={props.ctx.canDeleteProject}
       workspacesEnabled={props.ctx.workspacesEnabled}
       closeProject={props.ctx.closeProject}
       setMenu={(value) => setState("menu", value)}

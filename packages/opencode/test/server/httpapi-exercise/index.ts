@@ -165,6 +165,10 @@ const scenarios: Scenario[] = [
   http.protected.get("/config/providers", "config.providers").json(),
   http.protected.get("/project", "project.list").json(200, array, "status"),
   http.protected.get("/project/managed", "project.managed").json(200, array, "status"),
+  http.protected.get("/project/managed/root", "project.managedRoot").json(200, (body) => {
+    object(body)
+    check(body.directory === exerciseWorkspaceRoot, "managed root should come from OPENCODE_WORKSPACE_ROOT")
+  }),
   http.protected
     .post("/project", "project.create")
     .mutating()
@@ -176,6 +180,19 @@ const scenarios: Scenario[] = [
       check(path.basename(body.directory).length === 36, "project directory should use a UUID")
       object(body.time)
       check(typeof body.time.created === "number", "project create should return creation time")
+    }),
+  http.protected
+    .delete("/project/managed/{workspaceID}", "project.deleteManaged")
+    .mutating()
+    .seeded((ctx) => ctx.managedWorkspace())
+    .at((ctx) => ({
+      path: route("/project/managed/{workspaceID}", { workspaceID: ctx.state.id }),
+      headers: ctx.headers({ "x-opencode-directory": ctx.state.directory }),
+    }))
+    .json(200, (body, ctx) => {
+      object(body)
+      check(body.id === ctx.state.id, "managed workspace delete should return deleted id")
+      check(body.directory === ctx.state.directory, "managed workspace delete should return deleted directory")
     }),
   http.protected.get("/project/current", "project.current").json(
     200,

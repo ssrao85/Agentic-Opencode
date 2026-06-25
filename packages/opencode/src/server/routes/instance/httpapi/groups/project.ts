@@ -2,7 +2,7 @@ import { Project } from "@/project/project"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
-import { ProjectNotFoundError } from "../errors"
+import { ApiNotFoundError, ProjectNotFoundError } from "../errors"
 import { Authorization } from "../middleware/authorization"
 import { InstanceContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
@@ -47,6 +47,28 @@ export const ProjectApi = HttpApi.make("project")
             identifier: "project.managed",
             summary: "List managed workspaces",
             description: "List shared workspace directories managed by this OpenCode server.",
+          }),
+        ),
+        HttpApiEndpoint.get("managedRoot", `${root}/managed/root`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Project.ManagedWorkspaceRoot, "Managed workspace root"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "project.managedRoot",
+            summary: "Get managed workspace root",
+            description: "Get the root directory that contains server-managed workspaces.",
+          }),
+        ),
+        HttpApiEndpoint.delete("deleteManaged", `${root}/managed/:workspaceID`, {
+          params: { workspaceID: Schema.String },
+          query: WorkspaceRoutingQuery,
+          success: described(Project.ManagedWorkspace, "Deleted managed workspace"),
+          error: [HttpApiError.BadRequest, ApiNotFoundError],
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "project.deleteManaged",
+            summary: "Delete managed workspace",
+            description: "Delete a shared managed workspace, its directory, and its sessions.",
           }),
         ),
         HttpApiEndpoint.get("current", `${root}/current`, {

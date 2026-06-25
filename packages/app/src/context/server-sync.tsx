@@ -1,6 +1,7 @@
 import type {
   Config,
   ManagedWorkspace,
+  ManagedWorkspaceRoot,
   OpencodeClient,
   Path,
   Project,
@@ -51,7 +52,9 @@ type GlobalStore = {
   error?: InitError
   path: Path
   project: Project[]
+  managed_workspace_root: ManagedWorkspaceRoot | undefined
   managed_workspace: ManagedWorkspace[]
+  managed_workspace_deleted: ManagedWorkspace[]
   session_todo: {
     [sessionID: string]: Todo[]
   }
@@ -126,7 +129,9 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       return !bootstrap.isPending
     },
     project: [],
+    managed_workspace_root: undefined,
     managed_workspace: [],
+    managed_workspace_deleted: [],
     session_todo: {},
     provider_auth: {},
     get path() {
@@ -395,6 +400,7 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
         },
         setGlobalProject: setProjects,
         setManagedWorkspace: (next) => setGlobalStore("managed_workspace", next),
+        setManagedWorkspaceDeleted: (next) => setGlobalStore("managed_workspace_deleted", next),
       })
       if (event.type === "server.connected" || event.type === "global.disposed") {
         if (recent) return

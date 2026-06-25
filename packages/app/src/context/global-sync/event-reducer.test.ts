@@ -168,6 +168,37 @@ describe("applyGlobalEvent", () => {
 
     expect(managedWorkspace.map((item) => item.id)).toEqual(["new", "existing"])
   })
+
+  test("removes a managed workspace deleted by another client", () => {
+    const deleted = { id: "gone", directory: "/all-workspaces/gone", time: { created: 1, updated: 1 } }
+    const managedWorkspace = [
+      deleted,
+      { id: "kept", directory: "/all-workspaces/kept", time: { created: 2, updated: 2 } },
+    ] as ManagedWorkspace[]
+    const deletedWorkspace = [] as ManagedWorkspace[]
+
+    applyGlobalEvent({
+      event: {
+        type: "managed.workspace.deleted",
+        properties: deleted,
+      },
+      project: [],
+      managedWorkspace,
+      refresh() {},
+      setGlobalProject() {},
+      setManagedWorkspace(next) {
+        if (typeof next !== "function") return
+        managedWorkspace.splice(0, managedWorkspace.length, ...next(managedWorkspace))
+      },
+      setManagedWorkspaceDeleted(next) {
+        if (typeof next !== "function") return
+        deletedWorkspace.splice(0, deletedWorkspace.length, ...next(deletedWorkspace))
+      },
+    })
+
+    expect(managedWorkspace.map((item) => item.id)).toEqual(["kept"])
+    expect(deletedWorkspace.map((item) => item.id)).toEqual(["gone"])
+  })
 })
 
 describe("applyDirectoryEvent", () => {

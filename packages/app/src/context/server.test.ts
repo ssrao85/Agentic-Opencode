@@ -115,6 +115,42 @@ describe("createServerProjects", () => {
       dispose()
     })
   })
+
+  test("clears last project when closing the last matching entry", () => {
+    createRoot((dispose) => {
+      const [scope] = createSignal(ServerScope.local)
+      const [store, setStore] = createStore({
+        projects: { [ServerScope.local]: [{ worktree: "/deleted", expanded: true }] },
+        lastProject: { [ServerScope.local]: "/deleted" },
+      })
+      const projects = createServerProjects({ scope, store, setStore })
+
+      projects.close("/deleted")
+
+      expect(projects.list()).toEqual([])
+      expect(projects.last()).toBeUndefined()
+      dispose()
+    })
+  })
+
+  test("does not rewrite projects when closing a missing non-last project", () => {
+    createRoot((dispose) => {
+      const [scope] = createSignal(ServerScope.local)
+      const initial = [{ worktree: "/kept", expanded: true }]
+      const [store, setStore] = createStore({
+        projects: { [ServerScope.local]: initial },
+        lastProject: { [ServerScope.local]: "/kept" },
+      })
+      const projects = createServerProjects({ scope, store, setStore })
+      const before = projects.list()
+
+      projects.close("/missing")
+
+      expect(projects.list()).toBe(before)
+      expect(projects.last()).toBe("/kept")
+      dispose()
+    })
+  })
 })
 
 describe("migrateCanonicalLocalServerState", () => {

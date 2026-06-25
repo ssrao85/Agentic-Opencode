@@ -78,6 +78,7 @@ export type Event =
   | EventCommandExecuted
   | EventProjectUpdated
   | EventManagedWorkspaceCreated
+  | EventManagedWorkspaceDeleted
   | EventSessionStatus
   | EventSessionIdle
   | EventQuestionAsked
@@ -1530,6 +1531,19 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "managed.workspace.deleted"
+        properties: {
+          id: string
+          directory: string
+          name?: string
+          time: {
+            created: number
+            updated: number
+          }
+        }
+      }
+    | {
+        id: string
         type: "session.status"
         properties: {
           sessionID: string
@@ -2490,6 +2504,17 @@ export type ManagedWorkspace = {
   }
 }
 
+export type ManagedWorkspaceRoot = {
+  directory: string
+}
+
+export type NotFoundError = {
+  name: "NotFoundError"
+  data: {
+    message: string
+  }
+}
+
 export type ProjectNotFoundError = {
   _tag: "ProjectNotFoundError"
   projectID: string
@@ -2595,13 +2620,6 @@ export type ProviderAuthError1 = {
     field?: string
     message?: string
     kind?: string
-  }
-}
-
-export type NotFoundError = {
-  name: "NotFoundError"
-  data: {
-    message: string
   }
 }
 
@@ -5062,6 +5080,20 @@ export type EventManagedWorkspaceCreated = {
   }
 }
 
+export type EventManagedWorkspaceDeleted = {
+  id: string
+  type: "managed.workspace.deleted"
+  properties: {
+    id: string
+    directory: string
+    name?: string
+    time: {
+      created: number
+      updated: number
+    }
+  }
+}
+
 export type EventSessionStatus = {
   id: string
   type: "session.status"
@@ -6914,6 +6946,68 @@ export type ProjectManagedResponses = {
 }
 
 export type ProjectManagedResponse = ProjectManagedResponses[keyof ProjectManagedResponses]
+
+export type ProjectManagedRootData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/managed/root"
+}
+
+export type ProjectManagedRootErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectManagedRootError = ProjectManagedRootErrors[keyof ProjectManagedRootErrors]
+
+export type ProjectManagedRootResponses = {
+  /**
+   * Managed workspace root
+   */
+  200: ManagedWorkspaceRoot
+}
+
+export type ProjectManagedRootResponse = ProjectManagedRootResponses[keyof ProjectManagedRootResponses]
+
+export type ProjectDeleteManagedData = {
+  body?: never
+  path: {
+    workspaceID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/managed/{workspaceID}"
+}
+
+export type ProjectDeleteManagedErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type ProjectDeleteManagedError = ProjectDeleteManagedErrors[keyof ProjectDeleteManagedErrors]
+
+export type ProjectDeleteManagedResponses = {
+  /**
+   * Deleted managed workspace
+   */
+  200: ManagedWorkspace
+}
+
+export type ProjectDeleteManagedResponse = ProjectDeleteManagedResponses[keyof ProjectDeleteManagedResponses]
 
 export type ProjectCurrentData = {
   body?: never

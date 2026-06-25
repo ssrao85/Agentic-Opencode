@@ -1,5 +1,5 @@
 import { createSimpleContext } from "@opencode-ai/ui/context"
-import { createEffect, createMemo, createRoot } from "solid-js"
+import { createEffect, createMemo, createRoot, untrack } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createServerProjects, ServerConnection, useServer } from "./server"
 import { useServerHealth } from "@/utils/server-health"
@@ -8,6 +8,7 @@ import { createServerSyncContext } from "./server-sync"
 import { getOwner } from "solid-js/web"
 import { QueryClient } from "@tanstack/solid-query"
 import type { ServerScope } from "@/utils/server-scope"
+import { pathKey } from "@/utils/path-key"
 
 export const { use: useGlobal, provider: GlobalProvider } = createSimpleContext({
   name: "Global",
@@ -111,13 +112,38 @@ function createServerCtx(
 
   createEffect(() => {
     if (!sync.ready) return
+    const root = sync.data.managed_workspace_root?.directory
+    const managed = sync.data.managed_workspace
+    if (root) {
+      const managedDirectories = new Set(managed.map((workspace) => pathKey(workspace.directory)))
+      for (const project of projects.list()) {
+        if (isDirectChild(root, project.worktree) && !managedDirectories.has(pathKey(project.worktree))) {
+          projects.close(project.worktree)
+        }
+      }
+      const last = projects.last()
+      if (last && isDirectChild(root, last) && !managedDirectories.has(pathKey(last))) {
+        projects.close(last)
+      }
+    }
+
     const opened = new Set(projects.list().map((project) => project.worktree))
-    for (const workspace of sync.data.managed_workspace) {
+    for (const workspace of managed) {
       if (opened.has(workspace.directory)) continue
       projects.open(workspace.directory)
       opened.add(workspace.directory)
       void sync.project.loadSessions(workspace.directory)
     }
+  })
+
+  createEffect(() => {
+    if (!sync.ready) return
+    const deleted = sync.data.managed_workspace_deleted.map((workspace) => workspace.directory)
+    untrack(() => {
+      for (const directory of deleted) {
+        projects.close(directory)
+      }
+    })
   })
 
   function enrich(project: { worktree: string; expanded: boolean }) {
@@ -159,4 +185,16 @@ export type ServerCtx = ReturnType<typeof createServerCtx>
 function isLocalHost(url: string) {
   const host = url.replace(/^https?:\/\//, "").split(":")[0]
   if (host === "localhost" || host === "127.0.0.1") return "local"
+}
+
+function isDirectChild(root: string, candidate: string) {
+  return parentDirectory(candidate) === pathKey(root)
+}
+
+function parentDirectory(input: string) {
+  const normalized = String(pathKey(input))
+  const index = normalized.lastIndexOf("/")
+  if (index === 0) return pathKey("/")
+  if (index <= 0) return pathKey("")
+  return pathKey(normalized.slice(0, index))
 }

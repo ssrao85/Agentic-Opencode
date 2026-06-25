@@ -5,6 +5,7 @@ import type {
   PermissionRequest,
   Project,
   ManagedWorkspace,
+  ManagedWorkspaceRoot,
   ProviderAuthResponse,
   QuestionRequest,
   Session,
@@ -27,7 +28,9 @@ type GlobalStore = {
   ready: boolean
   path: Path
   project: Project[]
+  managed_workspace_root: ManagedWorkspaceRoot | undefined
   managed_workspace: ManagedWorkspace[]
+  managed_workspace_deleted: ManagedWorkspace[]
   session_todo: {
     [sessionID: string]: Todo[]
   }
@@ -113,6 +116,12 @@ export const loadManagedWorkspacesQuery = (scope: ServerScope, sdk: OpencodeClie
     queryFn: () => retry(() => sdk.project.managed().then((x) => x.data ?? [])),
   })
 
+export const loadManagedWorkspaceRootQuery = (scope: ServerScope, sdk: OpencodeClient) =>
+  queryOptions({
+    queryKey: [scope, "managed_workspace_root"],
+    queryFn: () => retry(() => sdk.project.managedRoot().then((x) => x.data)),
+  })
+
 export async function bootstrapGlobal(input: {
   serverSDK: OpencodeClient
   scope: ServerScope
@@ -130,6 +139,10 @@ export async function bootstrapGlobal(input: {
       input.queryClient
         .fetchQuery(loadProjectsQuery(input.scope, input.serverSDK))
         .then((data) => input.setGlobalStore("project", data)),
+    () =>
+      input.queryClient
+        .fetchQuery(loadManagedWorkspaceRootQuery(input.scope, input.serverSDK))
+        .then((data) => input.setGlobalStore("managed_workspace_root", data)),
     () =>
       input.queryClient
         .fetchQuery(loadManagedWorkspacesQuery(input.scope, input.serverSDK))

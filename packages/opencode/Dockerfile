@@ -29,7 +29,13 @@ RUN apk add --no-cache \
     glib-dev \
     libgsf-dev \
     gd-dev \
-    zlib-dev
+    zlib-dev \
+    chromium \
+    nss freetype harfbuzz ttf-freefont ca-certificates 
+
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
+RUN npm install -g playwright
 
 # Install uv and uvx from the official uv image
 COPY --from=uv /uv /uvx /usr/local/bin/

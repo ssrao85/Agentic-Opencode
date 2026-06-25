@@ -144,6 +144,7 @@ function withContext<A, E>(
               if (!instance) throw new Error("scenario needs a project directory")
               return instance.project
             }),
+          managedWorkspace: () => run(modules.Project.Service.use((svc) => svc.createManaged())),
           message: (sessionID, input) =>
             Effect.gen(function* () {
               const info: SessionV1.User = {

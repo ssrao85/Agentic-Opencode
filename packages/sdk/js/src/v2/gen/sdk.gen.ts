@@ -134,6 +134,8 @@ import type {
   ProjectCreateResponses,
   ProjectCurrentErrors,
   ProjectCurrentResponses,
+  ProjectDeleteManagedErrors,
+  ProjectDeleteManagedResponses,
   ProjectDirectoriesErrors,
   ProjectDirectoriesResponses,
   ProjectInitGitErrors,
@@ -142,6 +144,8 @@ import type {
   ProjectListResponses,
   ProjectManagedErrors,
   ProjectManagedResponses,
+  ProjectManagedRootErrors,
+  ProjectManagedRootResponses,
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   Prompt,
@@ -2624,6 +2628,72 @@ export class Project extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ProjectManagedResponses, ProjectManagedErrors, ThrowOnError>({
       url: "/project/managed",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get managed workspace root
+   *
+   * Get the root directory that contains server-managed workspaces.
+   */
+  public managedRoot<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProjectManagedRootResponses, ProjectManagedRootErrors, ThrowOnError>({
+      url: "/project/managed/root",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Delete managed workspace
+   *
+   * Delete a shared managed workspace, its directory, and its sessions.
+   */
+  public deleteManaged<ThrowOnError extends boolean = false>(
+    parameters: {
+      workspaceID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "workspaceID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      ProjectDeleteManagedResponses,
+      ProjectDeleteManagedErrors,
+      ThrowOnError
+    >({
+      url: "/project/managed/{workspaceID}",
       ...options,
       ...params,
     })

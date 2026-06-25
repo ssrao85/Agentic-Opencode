@@ -1037,6 +1037,8 @@ export const dict = {
   "workspace.status.dirty": "Unmerged changes detected in this workspace.",
   "workspace.delete.title": "Delete workspace",
   "workspace.delete.confirm": 'Delete workspace "{{name}}"?',
+  "workspace.delete.managed.description":
+    "This permanently deletes the workspace directory and all sessions for everyone using this server.",
   "workspace.delete.button": "Delete workspace",
   "workspace.reset.title": "Reset workspace",
   "workspace.reset.confirm": 'Reset workspace "{{name}}"?',

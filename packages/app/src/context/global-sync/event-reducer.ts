@@ -25,6 +25,7 @@ export function applyGlobalEvent(input: {
   managedWorkspace: ManagedWorkspace[]
   setGlobalProject: (next: Project[] | ((draft: Project[]) => Project[])) => void
   setManagedWorkspace: (next: ManagedWorkspace[] | ((draft: ManagedWorkspace[]) => ManagedWorkspace[])) => void
+  setManagedWorkspaceDeleted?: (next: ManagedWorkspace[] | ((draft: ManagedWorkspace[]) => ManagedWorkspace[])) => void
   refresh: () => void
 }) {
   if (input.event.type === "global.disposed" || input.event.type === "server.connected") {
@@ -35,6 +36,18 @@ export function applyGlobalEvent(input: {
   if (input.event.type === "managed.workspace.created") {
     const properties = input.event.properties as ManagedWorkspace
     input.setManagedWorkspace((list) => [
+      properties,
+      ...list.filter((item) => item.id !== properties.id && item.directory !== properties.directory),
+    ])
+    return
+  }
+
+  if (input.event.type === "managed.workspace.deleted") {
+    const properties = input.event.properties as ManagedWorkspace
+    input.setManagedWorkspace((list) =>
+      list.filter((item) => item.id !== properties.id && item.directory !== properties.directory),
+    )
+    input.setManagedWorkspaceDeleted?.((list) => [
       properties,
       ...list.filter((item) => item.id !== properties.id && item.directory !== properties.directory),
     ])

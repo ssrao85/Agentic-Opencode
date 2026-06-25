@@ -26,7 +26,7 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Dialog } from "@opencode-ai/ui/dialog"
 import { getFilename } from "@opencode-ai/core/util/path"
-import { Session, type Message } from "@opencode-ai/sdk/v2/client"
+import { Session, type ManagedWorkspace, type Message } from "@opencode-ai/sdk/v2/client"
 import { usePlatform } from "@/context/platform"
 import { useSettings } from "@/context/settings"
 import { createStore, produce, reconcile } from "solid-js/store"
@@ -1498,6 +1498,74 @@ export default function Layout(props: ParentProps) {
     return openProject(created.directory)
   }
 
+  function managedWorkspace(project: LocalProject | undefined) {
+    if (!project) return
+    const key = pathKey(project.worktree)
+    return serverSync().data.managed_workspace.find((workspace) => pathKey(workspace.directory) === key)
+  }
+
+  function removeManagedWorkspaceLocally(workspace: ManagedWorkspace) {
+    const key = pathKey(workspace.directory)
+    serverSync().set(
+      "managed_workspace",
+      produce((draft) => {
+        const index = draft.findIndex((item) => item.id === workspace.id || pathKey(item.directory) === key)
+        if (index !== -1) draft.splice(index, 1)
+      }),
+    )
+    serverSync().set("managed_workspace_deleted", (list) => [
+      workspace,
+      ...list.filter((item) => item.id !== workspace.id && pathKey(item.directory) !== key),
+    ])
+    setStore(
+      produce((draft) => {
+        delete draft.lastProjectSession[workspace.directory]
+        delete draft.workspaceOrder[workspace.directory]
+        delete draft.workspaceName[workspace.directory]
+        delete draft.workspaceBranchName[workspace.directory]
+        delete draft.workspaceExpanded[workspace.directory]
+      }),
+    )
+    layout.projects.close(workspace.directory)
+  }
+
+  async function deleteManagedWorkspace(workspace: ManagedWorkspace) {
+    const directory = workspace.directory
+    const key = pathKey(directory)
+    const active = pathKey(currentDir()) === key || pathKey(currentProject()?.worktree ?? "") === key
+    if (active) {
+      const next = layout.projects.list().find((project) => pathKey(project.worktree) !== key)
+      navigateWithSidebarReset(next ? `/${base64Encode(next.worktree)}/session` : "/")
+    }
+
+    const [workspaceStore] = serverSync().child(directory, { bootstrap: false })
+    clearWorkspaceTerminals(
+      directory,
+      workspaceStore.session.map((session) => session.id),
+      platform,
+      serverSDK().scope,
+    )
+    await serverSDK()
+      .client.instance.dispose({ directory })
+      .catch(() => undefined)
+
+    setBusy(directory, true)
+    const deleted = await serverSDK()
+      .client.project.deleteManaged({ workspaceID: workspace.id, directory })
+      .then((x) => x.data)
+      .catch((err) => {
+        showToast({
+          title: language.t("workspace.delete.failed.title"),
+          description: errorMessage(err, language.t("common.requestFailed")),
+        })
+        return undefined
+      })
+    setBusy(directory, false)
+
+    if (!deleted) return
+    removeManagedWorkspaceLocally(deleted)
+  }
+
   const deleteWorkspace = async (root: string, directory: string, leaveDeletedWorkspace = false) => {
     if (directory === root) return
 
@@ -1637,6 +1705,39 @@ export default function Layout(props: ParentProps) {
         },
       ],
     })
+  }
+
+  function DialogDeleteManagedWorkspace(props: { project: LocalProject }) {
+    const workspace = createMemo(() => managedWorkspace(props.project))
+    const name = createMemo(() => props.project.name || getFilename(props.project.worktree))
+
+    const handleDelete = () => {
+      const target = workspace()
+      if (!target) return
+      dialog.close()
+      void deleteManagedWorkspace(target)
+    }
+
+    return (
+      <Dialog title={language.t("workspace.delete.title")} fit>
+        <div class="flex flex-col gap-4 pl-6 pr-2.5 pb-3">
+          <div class="flex flex-col gap-1">
+            <span class="text-14-regular text-text-strong">
+              {language.t("workspace.delete.confirm", { name: name() })}
+            </span>
+            <span class="text-12-regular text-text-weak">{language.t("workspace.delete.managed.description")}</span>
+          </div>
+          <div class="flex justify-end gap-2">
+            <Button variant="ghost" size="large" onClick={() => dialog.close()}>
+              {language.t("common.cancel")}
+            </Button>
+            <Button variant="primary" size="large" disabled={!workspace()} onClick={handleDelete}>
+              {language.t("workspace.delete.button")}
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+    )
   }
 
   function DialogDeleteWorkspace(props: { root: string; directory: string }) {
@@ -2028,7 +2129,9 @@ export default function Layout(props: ParentProps) {
     openSidebar: () => layout.sidebar.open(),
     closeProject,
     showEditProjectDialog: (proj) => showEditProjectDialog(server.current!, proj),
+    showDeleteManagedWorkspaceDialog: (proj) => dialog.show(() => <DialogDeleteManagedWorkspace project={proj} />),
     toggleProjectWorkspaces,
+    canDeleteProject: (project) => !!managedWorkspace(project),
     workspacesEnabled: (project) => project.vcs === "git" && layout.sidebar.workspaces(project.worktree)(),
     workspaceIds,
     workspaceLabel,
@@ -2204,6 +2307,16 @@ export default function Layout(props: ParentProps) {
                           </DropdownMenu.ItemLabel>
                         </DropdownMenu.Item>
                         <DropdownMenu.Separator />
+                        <DropdownMenu.Item
+                          data-action="project-delete-menu"
+                          data-project={slug()}
+                          disabled={!managedWorkspace(project)}
+                          onSelect={() => {
+                            dialog.show(() => <DialogDeleteManagedWorkspace project={project} />)
+                          }}
+                        >
+                          <DropdownMenu.ItemLabel>{language.t("common.delete")}</DropdownMenu.ItemLabel>
+                        </DropdownMenu.Item>
                         <DropdownMenu.Item
                           data-action="project-close-menu"
                           data-project={slug()}
