@@ -6,6 +6,7 @@ FROM alpine:3.22 AS base
 ARG BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
 ENV BUN_RUNTIME_TRANSPILER_CACHE_PATH=${BUN_RUNTIME_TRANSPILER_CACHE_PATH}
 
+
 RUN apk add --no-cache \
     libgcc \
     libstdc++ \
@@ -30,8 +31,37 @@ RUN apk add --no-cache \
     libgsf-dev \
     gd-dev \
     zlib-dev \
+    zlib \
+    icu-libs \
+    krb5-libs \
+    tzdata \
+    ca-certificates \
+    dotnet8-sdk \
     chromium \
-    nss freetype harfbuzz ttf-freefont ca-certificates 
+    nss \
+    freetype \
+    harfbuzz \
+    ttf-freefont \
+    libreoffice \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
+    fontconfig \
+    font-dejavu \
+    font-liberation \
+    font-noto \
+    font-noto-cjk \
+    openjdk17-jre-headless
+
+ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
+ENV DOTNET_NOLOGO=true
+ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
+ENV DOTNET_CLI_HOME=/tmp/dotnet
+ENV NUGET_PACKAGES=/tmp/nuget-packages
+
+RUN mkdir -p /tmp/dotnet /tmp/nuget-packages && \
+    chgrp -R 0 /tmp/dotnet /tmp/nuget-packages && \
+    chmod -R g=u /tmp/dotnet /tmp/nuget-packages
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
@@ -59,6 +89,10 @@ RUN uv pip install --python ${VIRTUAL_ENV}/bin/python --upgrade pip setuptools w
 RUN chgrp -R 0 ${VIRTUAL_ENV} \
     && chmod -R g=u ${VIRTUAL_ENV} \
     && find ${VIRTUAL_ENV} -type d -exec chmod g+s {} +
+
+# Also allow OpenShift random UID users to write .NET/NuGet caches
+RUN chgrp -R 0 /tmp/dotnet /tmp/nuget-packages \
+    && chmod -R g=u /tmp/dotnet /tmp/nuget-packages
 
 # Build libpst/readpst from source because Alpine does not provide Debian's pst-utils package
 ARG LIBPST_TAG=libpst-0.6.76
@@ -97,6 +131,10 @@ RUN opencode --version \
     && uv --version \
     && node --version \
     && npm --version \
+    && dotnet --info \
+    && dotnet --list-sdks \
+    && libreoffice --headless --version \
+    && soffice --headless --version \
     && readpst -V
 
 EXPOSE 3000
