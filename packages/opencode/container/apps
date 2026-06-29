@@ -1,0 +1,337 @@
+#!/usr/bin/env node
+"use strict"
+
+// `apps` — manage loopback apps exposed by opencode under /apps/<name>/*.
+//
+// opencode reads a tiny name->port JSON registry per request (see
+// server/routes/instance/httpapi/apps-proxy.ts) and proxies /apps/<name>/* to
+// 127.0.0.1:<port>. This CLI maintains that registry and launches each app
+// detached on its OWN free port — deploying one app never collides with, or
+// kills, another. Only redeploying the same name replaces that app.
+//
+// Registry path: $OPENCODE_APPS_REGISTRY (default /all-workspaces/apps.json)
+// so it lives on the persistent volume alongside the workspaces.
+
+import fs from "node:fs"
+import net from "node:net"
+import path from "node:path"
+import { spawn } from "node:child_process"
+
+const REGISTRY = process.env.OPENCODE_APPS_REGISTRY || "/all-workspaces/apps.json"
+const LOG_DIR = process.env.OPENCODE_APPS_LOG_DIR || "/all-workspaces/apps-logs"
+const PORT_MIN = 8000
+const PORT_MAX = 8999
+
+function die(msg) {
+  console.error("apps: " + msg)
+  process.exit(1)
+}
+
+function readRegistry() {
+  try {
+    const r = JSON.parse(fs.readFileSync(REGISTRY, "utf8"))
+    return r && typeof r === "object" ? r : {}
+  } catch {
+    return {}
+  }
+}
+
+function writeRegistry(reg) {
+  fs.mkdirSync(path.dirname(REGISTRY), { recursive: true })
+  const tmp = REGISTRY + ".tmp"
+  fs.writeFileSync(tmp, JSON.stringify(reg, null, 2))
+  fs.renameSync(tmp, REGISTRY) // atomic swap so a concurrent reader never sees a half-written file
+}
+
+function alive(pid) {
+  if (!pid) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function stop(pid) {
+  if (!pid || !alive(pid)) return
+  try {
+    process.kill(-pid) // whole process group
+  } catch {}
+  try {
+    process.kill(pid)
+  } catch {}
+}
+
+function validName(n) {
+  return typeof n === "string" && /^[a-z0-9][a-z0-9_-]*$/i.test(n)
+}
+
+function intPort(p) {
+  const n = Number(p)
+  return Number.isInteger(n) && n >= 1 && n <= 65535 ? n : undefined
+}
+
+// Complete, clickable URL for an app. If OPENCODE_APPS_BASE_URL is set (to
+// opencode's public origin, e.g. the OpenShift route), the result is absolute
+// like https://host/apps/<name>/. Otherwise it is the root-relative /apps/<name>/
+// which a browser resolves against opencode's current origin.
+function publicUrl(name) {
+  const base = (process.env.OPENCODE_APPS_BASE_URL || "").replace(/\/+$/, "")
+  return `${base}/apps/${name}/`
+}
+
+// Resolve an executable to an absolute path (node's spawn does not reliably
+// search PATH when env is overridden). Falls back to the bare name.
+function resolveBin(candidates) {
+  for (const c of candidates) if (c.includes("/") && fs.existsSync(c)) return c
+  return candidates[candidates.length - 1]
+}
+const uvicornBin = () => resolveBin(["/opt/venv/bin/uvicorn", "/usr/local/bin/uvicorn", "uvicorn"])
+const pythonBin = () => resolveBin(["/opt/venv/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3", "python3"])
+
+// True if nothing is currently listening on the port (best-effort bind probe).
+function canBind(p) {
+  return new Promise((resolve) => {
+    const srv = net.createServer()
+    srv.once("error", () => resolve(false))
+    srv.once("listening", () => srv.close(() => resolve(true)))
+    srv.listen(p, "127.0.0.1")
+  })
+}
+
+// Pick a free port: never one held by another registered app, and not currently
+// bound. Prefer `wanted` if free, otherwise scan PORT_MIN..PORT_MAX in order.
+async function freePort(wanted, selfName) {
+  const reg = readRegistry()
+  const taken = new Set(
+    Object.entries(reg)
+      .filter(([n]) => n !== selfName)
+      .map(([, e]) => e && e.port)
+      .filter(Boolean),
+  )
+  const ok = async (p) => !!p && !taken.has(p) && (await canBind(p))
+  if (await ok(wanted)) return wanted
+  for (let p = PORT_MIN; p <= PORT_MAX; p++) if (await ok(p)) return p
+  die(`no free port available in ${PORT_MIN}-${PORT_MAX}`)
+}
+
+function add(name, p) {
+  if (!validName(name)) die(`invalid name: ${name} (use letters, digits, - and _)`)
+  const prt = intPort(p)
+  if (!prt) die(`invalid port: ${p}`)
+  const reg = readRegistry()
+  reg[name] = { ...(reg[name] || {}), port: prt }
+  writeRegistry(reg)
+  console.log(`registered ${name} -> 127.0.0.1:${prt}   open: ${publicUrl(name)}`)
+}
+
+async function run(name, wantedPort, cmd, cwd) {
+  if (!validName(name)) die(`invalid name: ${name}`)
+  if (!cmd.length) die("missing command — put it after `--`")
+  // Record the working dir so `apps restore` relaunches from the same place
+  // (e.g. `uvicorn main:app` needs the app's directory to resolve `main`).
+  const workdir = cwd || process.cwd()
+  const existing = readRegistry()[name]
+  // Redeploying the SAME app: stop its old instance so we don't leak a duplicate.
+  // Other apps are never touched.
+  if (existing && alive(existing.pid)) stop(existing.pid)
+  // Auto-allocate a free port so a new app never collides with a running one.
+  const prt = await freePort(wantedPort ?? (existing && existing.port), name)
+  // Substitute {port} in the command with the chosen port.
+  const finalCmd = cmd.map((a) => a.split("{port}").join(String(prt)))
+
+  fs.mkdirSync(LOG_DIR, { recursive: true })
+  const logFile = path.join(LOG_DIR, `${name}.log`)
+  const out = fs.openSync(logFile, "a")
+  const child = spawn(finalCmd[0], finalCmd.slice(1), {
+    cwd: workdir,
+    detached: true, // own process group so it outlives this CLI and can be group-killed
+    stdio: ["ignore", out, out],
+    env: { ...process.env, PORT: String(prt), OPENCODE_APP_PREFIX: `/apps/${name}` },
+  })
+  child.unref()
+  const reg = readRegistry()
+  reg[name] = { port: prt, pid: child.pid, cmd: finalCmd, cwd: workdir, log: logFile }
+  writeRegistry(reg)
+  console.log(`launched ${name} (pid ${child.pid}) -> 127.0.0.1:${prt}`)
+  console.log(`  open: ${publicUrl(name)}`)
+  console.log(`  logs: ${logFile}`)
+}
+
+// Auto-detect how to launch the app in `dir` and expose it as /apps/<name>/.
+// Returns { framework, cmd } ready for run(), { framework, hint } for a manual
+// command, or null. Uses {port} placeholders that run() substitutes.
+function detectDeploy(dir, name) {
+  const has = (f) => fs.existsSync(path.join(dir, f))
+  const read = (f) => {
+    try {
+      return fs.readFileSync(path.join(dir, f), "utf8")
+    } catch {
+      return ""
+    }
+  }
+  const prefix = `/apps/${name}`
+
+  // --- Python ASGI (FastAPI / Starlette / Quart) — fully automatic ---
+  // Prefer <name>.py so multiple apps in one folder deploy by name.
+  const py = []
+  if (has(`${name}.py`)) py.push(`${name}.py`)
+  for (const f of ["main.py", "app.py", "server.py", "asgi.py"]) if (has(f) && !py.includes(f)) py.push(f)
+  try {
+    for (const f of fs.readdirSync(dir)) if (f.endsWith(".py") && !py.includes(f)) py.push(f)
+  } catch {}
+  for (const f of py) {
+    const src = read(f)
+    const mod = f.slice(0, -3)
+    let m = src.match(/(\w+)\s*=\s*(?:FastAPI|Starlette|Quart)\s*\(/)
+    if (m) {
+      return {
+        framework: "FastAPI/ASGI",
+        cmd: [uvicornBin(), `${mod}:${m[1]}`, "--host", "127.0.0.1", "--port", "{port}", "--root-path", prefix],
+      }
+    }
+    m = src.match(/(\w+)\s*=\s*Flask\s*\(/)
+    if (m) {
+      return { framework: "Flask (WSGI)", hint: `SCRIPT_NAME=${prefix} gunicorn --bind 127.0.0.1:{port} ${mod}:${m[1]}` }
+    }
+  }
+
+  // --- Node — needs a base-path config, so hand back a command ---
+  if (has("package.json")) {
+    let scripts = {}
+    try {
+      scripts = JSON.parse(read("package.json")).scripts || {}
+    } catch {}
+    const script = scripts.dev ? "dev" : scripts.start ? "start" : null
+    if (script)
+      return {
+        framework: "Node",
+        hint: `npm run ${script}   (set the dev-server base/basePath to ${prefix} and bind 127.0.0.1:{port})`,
+      }
+  }
+
+  // --- Static site — proxy strips the prefix, so serve the folder as-is ---
+  if (has("index.html")) {
+    return {
+      framework: "static",
+      cmd: [pythonBin(), "-m", "http.server", "{port}", "--bind", "127.0.0.1", "--directory", dir],
+    }
+  }
+
+  return null
+}
+
+async function deploy(name) {
+  if (!validName(name)) die(`invalid name: ${name} (use letters, digits, - and _)`)
+  const dir = process.cwd()
+  const found = detectDeploy(dir, name)
+  if (!found)
+    die(
+      `could not auto-detect an app in ${dir}.\n` +
+        `Deploy it explicitly:  apps run ${name} -- <start command with --port {port} and prefix /apps/${name}>`,
+    )
+  if (!found.cmd)
+    die(`detected ${found.framework} — deploy it with:\n  apps run ${name} -- ${found.hint}`)
+  console.log(`detected ${found.framework} in ${dir}`)
+  await run(name, undefined, found.cmd, dir)
+}
+
+function list() {
+  const reg = readRegistry()
+  const names = Object.keys(reg)
+  if (!names.length) return console.log("(no apps registered)")
+  for (const n of names) {
+    const e = reg[n]
+    const status = e.pid ? (alive(e.pid) ? `up (pid ${e.pid})` : "DEAD") : "registered"
+    console.log(`${n.padEnd(16)} :${String(e.port).padEnd(6)} ${status.padEnd(16)} /apps/${n}/`)
+  }
+}
+
+function kill(name) {
+  const reg = readRegistry()
+  const e = reg[name]
+  if (!e) die(`no such app: ${name}`)
+  stop(e.pid)
+  delete reg[name]
+  writeRegistry(reg)
+  console.log(`stopped + unregistered ${name}`)
+}
+
+function rm(name) {
+  const reg = readRegistry()
+  if (!reg[name]) die(`no such app: ${name}`)
+  delete reg[name]
+  writeRegistry(reg)
+  console.log(`unregistered ${name} (process, if any, left running)`)
+}
+
+async function restore() {
+  const reg = readRegistry()
+  let n = 0
+  for (const name of Object.keys(reg)) {
+    const e = reg[name]
+    if (Array.isArray(e.cmd) && e.cmd.length && !alive(e.pid)) {
+      await run(name, e.port, e.cmd, e.cwd)
+      n++
+    }
+  }
+  console.log(`restored ${n} app(s)`)
+}
+
+async function main() {
+  const [, , sub, ...rest] = process.argv
+  switch (sub) {
+    case "deploy":
+      await deploy(rest[0])
+      break
+    case "add":
+      add(rest[0], rest[1])
+      break
+    case "run": {
+      const sep = rest.indexOf("--")
+      const head = sep === -1 ? rest : rest.slice(0, sep)
+      const cmd = sep === -1 ? [] : rest.slice(sep + 1)
+      const name = head[0]
+      const wanted = intPort(head[1]) // optional; undefined -> auto-allocate a free port
+      await run(name, wanted, cmd)
+      break
+    }
+    case "list":
+    case "ls":
+      list()
+      break
+    case "kill":
+      kill(rest[0])
+      break
+    case "rm":
+      rm(rest[0])
+      break
+    case "restore":
+      await restore()
+      break
+    default:
+      console.log(`opencode apps — expose loopback apps under /apps/<name>/  (registry: ${REGISTRY})
+
+usage:
+  apps deploy <name>                   AUTO-DEPLOY the app in the current dir as /apps/<name>/.
+                                       Detects the framework (FastAPI/ASGI, static, ...), makes it
+                                       prefix-aware, launches it on a free port, and registers it.
+                                       The one-command way to expose an app.
+  apps run <name> [port] -- <cmd...>   manual deploy: launch a detached app on a FREE port and
+                                       register it. Omit [port] to auto-pick; put {port} in <cmd>
+                                       for the chosen port. Never collides with or kills other apps.
+  apps add <name> <port>               register an already-running app
+  apps list                            list registered apps + status
+  apps kill <name>                     stop the app process and unregister
+  apps rm <name>                       unregister without killing
+  apps restore                         relaunch registered apps that aren't running
+
+examples:
+  cd /all-workspaces/<id> && apps deploy division        # FastAPI division.py -> /apps/division/
+  apps run sum-calc -- uvicorn main:app --host 127.0.0.1 --port {port} --root-path /apps/sum-calc
+  apps add legacy 8000`)
+  }
+}
+
+main()

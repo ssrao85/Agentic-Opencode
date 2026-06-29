@@ -114,6 +114,18 @@ RUN git clone --depth 1 --branch ${LIBPST_TAG} https://github.com/pst-format/lib
     && chmod +x /usr/local/bin/readpst /usr/local/bin/lspst /usr/local/bin/pst2ldif /usr/local/bin/nick2ldif \
     && rm -rf /tmp/libpst
 
+# `apps` helper: manages the /apps/<name>/* registry opencode proxies to.
+COPY container/apps /usr/local/bin/apps
+RUN chmod +x /usr/local/bin/apps
+
+# Deploy-app skill, available to every workspace. opencode scans
+# $HOME/.agents/skills/**/SKILL.md as global skills, and HOME=/ in this image.
+COPY container/skills /.agents/skills
+
+# Entrypoint wrapper: relaunch persisted apps (apps restore) before opencode.
+COPY container/entrypoint.sh /usr/local/bin/opencode-entrypoint
+RUN chmod +x /usr/local/bin/opencode-entrypoint
+
 FROM base AS build-amd64
 COPY dist/opencode-linux-x64-baseline-musl/bin/opencode /usr/local/bin/opencode
 
@@ -139,5 +151,5 @@ RUN opencode --version \
 
 EXPOSE 3000
 
-ENTRYPOINT ["opencode"]
+ENTRYPOINT ["opencode-entrypoint"]
 CMD ["web", "--hostname", "0.0.0.0", "--port", "3000"]

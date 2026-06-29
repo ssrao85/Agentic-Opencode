@@ -64,6 +64,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { lazy } from "@/util/lazy"
 import { CorsConfig, isAllowedCorsOrigin, type CorsOptions } from "@opencode-ai/server/cors"
 import { serveUIEffect } from "@/server/shared/ui"
+import { serveAppsProxy } from "./apps-proxy"
 import { ServerAuth } from "@/server/auth"
 import { InstanceHttpApi, RootHttpApi } from "./api"
 import { Api } from "@opencode-ai/server/api"
@@ -182,16 +183,26 @@ const docRoute = HttpRouter.use((router) => router.add("GET", "/doc", () => Effe
   Layer.provide(authOnlyRouterLayer),
 )
 
+// Raw catch-all. /apps/<name>/* is reverse-proxied to user-launched apps;
+// everything else serves the web UI. Both share the router auth (so /apps
+// inherits opencode's Basic-auth gate) and the WebSocket constructor (for
+// proxied upgrades). Dispatching inside one /* route — rather than registering
+// a second /apps/* wildcard — avoids any route-precedence ambiguity between the
+// proxy and the UI under bundling/minification.
 const uiRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
     const client = yield* HttpClient.HttpClient
     const flags = yield* RuntimeFlags.Service
-    yield* router.add("*", "/*", (request) =>
-      serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi }),
-    )
+    yield* router.add("*", "/*", (request) => {
+      const url = new URL(request.url, "http://localhost")
+      if (url.pathname === "/apps" || url.pathname.startsWith("/apps/")) {
+        return serveAppsProxy(client, request)
+      }
+      return serveUIEffect(request, { fs, client, disableEmbeddedWebUi: flags.disableEmbeddedWebUi })
+    })
   }),
-).pipe(Layer.provide(authOnlyRouterLayer))
+).pipe(Layer.provide(authOnlyRouterLayer), Layer.provide(Socket.layerWebSocketConstructorGlobal))
 
 type RouteRequirements =
   | HttpRouter.HttpRouter
