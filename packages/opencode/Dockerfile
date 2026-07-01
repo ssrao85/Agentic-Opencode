@@ -53,6 +53,49 @@ RUN apk add --no-cache \
     font-noto-cjk \
     openjdk17-jre-headless
 
+
+# LibreOffice/xlsx skill fix without changing opencode HOME/XDG/db paths.
+# Keep HOME=/ so opencode DB/config behavior does not change.
+# The xlsx recalc helper writes macros under HOME/.config/libreoffice/4,
+# so LibreOffice must use the same UserInstallation path.
+ENV SAL_USE_VCLPLUGIN=svp
+
+RUN chmod 1777 /tmp \
+    && mkdir -p \
+      /tmp/opencode \
+      /.config/libreoffice/4 \
+    && chgrp -R 0 /tmp/opencode /.config/libreoffice \
+    && chmod -R g=u /tmp/opencode /.config/libreoffice \
+    && chmod -R a+rwX /tmp/opencode /.config/libreoffice \
+    && fc-cache -f
+
+RUN cat > /usr/local/bin/soffice <<'EOF'
+#!/bin/sh
+set -eu
+
+export SAL_USE_VCLPLUGIN="${SAL_USE_VCLPLUGIN:-svp}"
+
+home="${HOME:-/}"
+
+if [ "$home" = "/" ]; then
+  LO_PROFILE="/.config/libreoffice/4"
+else
+  LO_PROFILE="${home%/}/.config/libreoffice/4"
+fi
+
+mkdir -p "$LO_PROFILE"
+
+rm -f "$LO_PROFILE/.lock" 2>/dev/null || true
+find "$LO_PROFILE" -name ".~lock*" -delete 2>/dev/null || true
+
+exec /usr/bin/soffice \
+  -env:UserInstallation="file://${LO_PROFILE}" \
+  "$@"
+EOF
+
+RUN chmod +x /usr/local/bin/soffice \
+    && ln -sf /usr/local/bin/soffice /usr/local/bin/libreoffice
+
 ENV DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=false
 ENV DOTNET_NOLOGO=true
 ENV DOTNET_SKIP_FIRST_TIME_EXPERIENCE=true
@@ -65,7 +108,7 @@ RUN mkdir -p /tmp/dotnet /tmp/nuget-packages && \
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
-RUN npm install -g playwright
+RUN npm install -g playwright docx
 
 # Install uv and uvx from the official uv image
 COPY --from=uv /uv /uvx /usr/local/bin/
@@ -121,6 +164,7 @@ RUN chmod +x /usr/local/bin/apps
 # Deploy-app skill, available to every workspace. opencode scans
 # $HOME/.agents/skills/**/SKILL.md as global skills, and HOME=/ in this image.
 COPY container/skills /.agents/skills
+COPY skills /skills
 
 # Entrypoint wrapper: relaunch persisted apps (apps restore) before opencode.
 COPY container/entrypoint.sh /usr/local/bin/opencode-entrypoint
