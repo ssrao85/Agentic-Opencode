@@ -17,6 +17,7 @@ python-docx
 docxtpl
 reportlab
 pypdf
+pdfplumber
 markdown
 pypandoc
 sqlalchemy
@@ -30,3 +31,4 @@ starlette
 python-multipart
 python-dotenv
 markitdown[all]
+Faker
