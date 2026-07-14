@@ -169,6 +169,16 @@ const scenarios: Scenario[] = [
     object(body)
     check(body.directory === exerciseWorkspaceRoot, "managed root should come from OPENCODE_WORKSPACE_ROOT")
   }),
+  http.protected.get("/project/managed/storage", "project.managedStorage").json(200, (body) => {
+    object(body)
+    check(typeof body.total === "number", "managed storage should return total bytes")
+    check(typeof body.remaining === "number", "managed storage should return remaining bytes")
+    check(typeof body.used === "number", "managed storage should return used bytes")
+    check(
+      typeof body.state === "string" && ["healthy", "warning", "critical"].includes(body.state),
+      "managed storage should return a state",
+    )
+  }),
   http.protected
     .post("/project", "project.create")
     .mutating()

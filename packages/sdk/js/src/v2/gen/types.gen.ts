@@ -2508,6 +2508,18 @@ export type ManagedWorkspaceRoot = {
   directory: string
 }
 
+export type ManagedStorage = {
+  total: number
+  used: number
+  available: number
+  remaining: number
+  usedPercent: number
+  remainingPercent: number
+  state: "healthy" | "warning" | "critical"
+  updatedAt: number
+  refreshIntervalMs: number
+}
+
 export type NotFoundError = {
   name: "NotFoundError"
   data: {
@@ -6974,6 +6986,34 @@ export type ProjectManagedRootResponses = {
 }
 
 export type ProjectManagedRootResponse = ProjectManagedRootResponses[keyof ProjectManagedRootResponses]
+
+export type ProjectManagedStorageData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/project/managed/storage"
+}
+
+export type ProjectManagedStorageErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProjectManagedStorageError = ProjectManagedStorageErrors[keyof ProjectManagedStorageErrors]
+
+export type ProjectManagedStorageResponses = {
+  /**
+   * Managed workspace storage
+   */
+  200: ManagedStorage
+}
+
+export type ProjectManagedStorageResponse = ProjectManagedStorageResponses[keyof ProjectManagedStorageResponses]
 
 export type ProjectDeleteManagedData = {
   body?: never

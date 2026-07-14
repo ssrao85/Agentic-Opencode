@@ -65,6 +65,7 @@ import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { DebugBar } from "@/components/debug-bar"
 import { HelpButton } from "@/components/help-button"
 import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
+import { WorkspaceDiskUsageBar } from "@/components/workspace-storage-indicator"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { ServerConnection, useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
@@ -2450,6 +2451,7 @@ export default function Layout(props: ParentProps) {
             </div>
           </div>
         </div>
+        <WorkspaceDiskUsageBar />
       </div>
     )
   }

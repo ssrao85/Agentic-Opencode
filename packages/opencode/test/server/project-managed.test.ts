@@ -31,6 +31,18 @@ type ManagedWorkspaceRoot = {
   directory: string
 }
 
+type ManagedStorage = {
+  total: number
+  used: number
+  available: number
+  remaining: number
+  usedPercent: number
+  remainingPercent: number
+  state: "healthy" | "warning" | "critical"
+  updatedAt: number
+  refreshIntervalMs: number
+}
+
 type SessionInfo = {
   id: string
   directory: string
@@ -130,6 +142,51 @@ describe("managed project workspaces", () => {
             event.payload.properties.directory === created.directory,
         ),
       ).toBe(true)
+    }),
+  )
+
+  it.instance("returns storage totals with configured thresholds and a short cache", () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const fs = yield* FSUtil.Service
+      const root = path.join(test.directory, "all-workspaces")
+      const previousPath = process.env.WORKSPACE_PATH
+      const previousRefresh = process.env.STORAGE_REFRESH_INTERVAL_MS
+      const previousWarning = process.env.STORAGE_WARNING_PERCENT
+      const previousCritical = process.env.STORAGE_CRITICAL_PERCENT
+      process.env.WORKSPACE_PATH = root
+      process.env.STORAGE_REFRESH_INTERVAL_MS = "12345"
+      process.env.STORAGE_WARNING_PERCENT = "100"
+      process.env.STORAGE_CRITICAL_PERCENT = "0"
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          if (previousPath === undefined) delete process.env.WORKSPACE_PATH
+          if (previousPath !== undefined) process.env.WORKSPACE_PATH = previousPath
+          if (previousRefresh === undefined) delete process.env.STORAGE_REFRESH_INTERVAL_MS
+          if (previousRefresh !== undefined) process.env.STORAGE_REFRESH_INTERVAL_MS = previousRefresh
+          if (previousWarning === undefined) delete process.env.STORAGE_WARNING_PERCENT
+          if (previousWarning !== undefined) process.env.STORAGE_WARNING_PERCENT = previousWarning
+          if (previousCritical === undefined) delete process.env.STORAGE_CRITICAL_PERCENT
+          if (previousCritical !== undefined) process.env.STORAGE_CRITICAL_PERCENT = previousCritical
+        }),
+      )
+      yield* fs.ensureDir(root)
+
+      const firstResponse = yield* requestInDirectory("/project/managed/storage", test.directory)
+      expect(firstResponse.status).toBe(200)
+      const first = yield* json<ManagedStorage>(firstResponse)
+      expect(first.total).toBeGreaterThan(0)
+      expect(first.remaining).toBeGreaterThan(0)
+      expect(first.available).toBe(first.remaining)
+      expect(first.used).toBe(first.total - first.remaining)
+      expect(first.usedPercent).toBeGreaterThanOrEqual(0)
+      expect(first.remainingPercent).toBeGreaterThan(0)
+      expect(first.refreshIntervalMs).toBe(12345)
+      expect(first.state).toBe("warning")
+
+      const secondResponse = yield* requestInDirectory("/project/managed/storage", test.directory)
+      expect(secondResponse.status).toBe(200)
+      expect((yield* json<ManagedStorage>(secondResponse)).updatedAt).toBe(first.updatedAt)
     }),
   )
 })

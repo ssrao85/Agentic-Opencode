@@ -5,6 +5,16 @@ export function truthy(key: string) {
   return value === "true" || value === "1"
 }
 
+function number(key: string, fallback: number) {
+  const value = Number(process.env[key])
+  if (!Number.isFinite(value) || value < 0) return fallback
+  return Math.floor(value)
+}
+
+function percent(key: string, fallback: number) {
+  return Math.min(100, number(key, fallback))
+}
+
 const copy = process.env["OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"]
 const fff = process.env["OPENCODE_DISABLE_FFF"]
 
@@ -65,6 +75,21 @@ export const Flag = {
   },
   get OPENCODE_WORKSPACE_ROOT() {
     return process.env["OPENCODE_WORKSPACE_ROOT"] ?? "/all-workspaces"
+  },
+  get WORKSPACE_PATH() {
+    return process.env["WORKSPACE_PATH"] ?? Flag.OPENCODE_WORKSPACE_ROOT
+  },
+  get STORAGE_REFRESH_INTERVAL_MS() {
+    return number("STORAGE_REFRESH_INTERVAL_MS", 60_000)
+  },
+  get STORAGE_STAT_TIMEOUT_MS() {
+    return number("STORAGE_STAT_TIMEOUT_MS", 5_000)
+  },
+  get STORAGE_WARNING_PERCENT() {
+    return percent("STORAGE_WARNING_PERCENT", 20)
+  },
+  get STORAGE_CRITICAL_PERCENT() {
+    return percent("STORAGE_CRITICAL_PERCENT", 10)
   },
   get OPENCODE_PURE() {
     return truthy("OPENCODE_PURE")

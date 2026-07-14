@@ -146,6 +146,8 @@ import type {
   ProjectManagedResponses,
   ProjectManagedRootErrors,
   ProjectManagedRootResponses,
+  ProjectManagedStorageErrors,
+  ProjectManagedStorageResponses,
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   Prompt,
@@ -2658,6 +2660,40 @@ export class Project extends HeyApiClient {
     )
     return (options?.client ?? this.client).get<ProjectManagedRootResponses, ProjectManagedRootErrors, ThrowOnError>({
       url: "/project/managed/root",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Get managed workspace storage
+   *
+   * Get filesystem storage capacity for the configured managed workspace path.
+   */
+  public managedStorage<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<
+      ProjectManagedStorageResponses,
+      ProjectManagedStorageErrors,
+      ThrowOnError
+    >({
+      url: "/project/managed/storage",
       ...options,
       ...params,
     })

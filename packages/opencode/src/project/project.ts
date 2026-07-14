@@ -23,8 +23,14 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import path from "path"
+import { statfs } from "node:fs/promises"
 
 const ProjectVcs = Schema.Literal("git")
+const ManagedStorageState = Schema.Union([
+  Schema.Literal("healthy"),
+  Schema.Literal("warning"),
+  Schema.Literal("critical"),
+])
 
 const ProjectIcon = Schema.Struct({
   url: optionalOmitUndefined(Schema.String),
@@ -59,6 +65,19 @@ export const ManagedWorkspaceRoot = Schema.Struct({
   directory: Schema.String,
 }).annotate({ identifier: "ManagedWorkspaceRoot" })
 export type ManagedWorkspaceRoot = Schema.Schema.Type<typeof ManagedWorkspaceRoot>
+
+export const ManagedStorage = Schema.Struct({
+  total: NonNegativeInt,
+  used: NonNegativeInt,
+  available: NonNegativeInt,
+  remaining: NonNegativeInt,
+  usedPercent: Schema.Finite,
+  remainingPercent: Schema.Finite,
+  state: ManagedStorageState,
+  updatedAt: NonNegativeInt,
+  refreshIntervalMs: NonNegativeInt,
+}).annotate({ identifier: "ManagedStorage" })
+export type ManagedStorage = Types.DeepMutable<Schema.Schema.Type<typeof ManagedStorage>>
 
 export const Info = Schema.Struct({
   id: ProjectV2.ID,
@@ -171,6 +190,7 @@ export interface Interface {
   readonly discover: (input: Info) => Effect.Effect<void>
   readonly list: () => Effect.Effect<Info[]>
   readonly managedRoot: () => Effect.Effect<ManagedWorkspaceRoot>
+  readonly managedStorage: () => Effect.Effect<ManagedStorage>
   readonly listManaged: () => Effect.Effect<ManagedWorkspace[]>
   readonly createManaged: () => Effect.Effect<ManagedWorkspace>
   readonly getManaged: (workspaceID: string) => Effect.Effect<ManagedWorkspace | undefined>
@@ -189,6 +209,42 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/Project") {}
 
 type GitResult = { code: number; text: string; stderr: string }
+type ManagedStorageConfig = ReturnType<typeof managedStorageConfig>
+type ManagedStorageCache = {
+  key: string
+  expiresAt: number
+  value: ManagedStorage
+}
+
+function managedStorageConfig() {
+  return {
+    directory: FSUtil.resolve(Flag.WORKSPACE_PATH),
+    refreshIntervalMs: Math.max(1, Flag.STORAGE_REFRESH_INTERVAL_MS),
+    timeoutMs: Math.max(1, Flag.STORAGE_STAT_TIMEOUT_MS),
+    warningPercent: Flag.STORAGE_WARNING_PERCENT,
+    criticalPercent: Flag.STORAGE_CRITICAL_PERCENT,
+  }
+}
+
+function managedStorageCacheKey(input: ManagedStorageConfig) {
+  return [
+    input.directory,
+    input.refreshIntervalMs,
+    input.timeoutMs,
+    input.warningPercent,
+    input.criticalPercent,
+  ].join("\0")
+}
+
+function managedStorageCacheMs(input: ManagedStorageConfig) {
+  return Math.max(250, Math.min(1_000, input.refreshIntervalMs))
+}
+
+function managedStorageState(remainingPercent: number, input: ManagedStorageConfig) {
+  if (remainingPercent <= input.criticalPercent) return "critical" as const
+  if (remainingPercent <= input.warningPercent) return "warning" as const
+  return "healthy" as const
+}
 
 export const layer = Layer.effect(
   Service,
@@ -201,6 +257,7 @@ export const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const { db } = yield* Database.Service
+    let managedStorageCache: ManagedStorageCache | undefined
 
     const git = Effect.fnUntraced(
       function* (args: string[], opts?: { cwd?: string }) {
@@ -445,6 +502,41 @@ export const layer = Layer.effect(
       return { directory: FSUtil.resolve(Flag.OPENCODE_WORKSPACE_ROOT) }
     })
 
+    const managedStorage = Effect.fn("Project.managedStorage")(function* () {
+      const config = managedStorageConfig()
+      const key = managedStorageCacheKey(config)
+      const now = Date.now()
+      if (managedStorageCache?.key === key && managedStorageCache.expiresAt > now) return managedStorageCache.value
+
+      const stats = yield* Effect.promise(() => statfs(config.directory)).pipe(
+        Effect.timeoutOrElse({
+          duration: config.timeoutMs,
+          orElse: () => Effect.die(new Error(`Storage stat timed out after ${config.timeoutMs}ms`)),
+        }),
+      )
+      const total = Math.max(0, Math.floor(stats.blocks * stats.bsize))
+      const remaining = Math.max(0, Math.floor(stats.bavail * stats.bsize))
+      const used = Math.max(0, total - remaining)
+      const remainingPercent = total === 0 ? 0 : (remaining / total) * 100
+      const result: ManagedStorage = {
+        total,
+        used,
+        available: remaining,
+        remaining,
+        usedPercent: total === 0 ? 0 : (used / total) * 100,
+        remainingPercent,
+        state: managedStorageState(remainingPercent, config),
+        updatedAt: now,
+        refreshIntervalMs: config.refreshIntervalMs,
+      }
+      managedStorageCache = {
+        key,
+        expiresAt: now + managedStorageCacheMs(config),
+        value: result,
+      }
+      return result
+    })
+
     const registerManaged = Effect.fn("Project.registerManaged")(function* (directory: string) {
       const now = Date.now()
       const row = yield* db
@@ -647,6 +739,7 @@ export const layer = Layer.effect(
       discover,
       list,
       managedRoot,
+      managedStorage,
       listManaged,
       createManaged,
       getManaged,

@@ -164,7 +164,7 @@ RUN chmod +x /usr/local/bin/apps
 # Deploy-app skill, available to every workspace. opencode scans
 # $HOME/.agents/skills/**/SKILL.md as global skills, and HOME=/ in this image.
 COPY container/skills /.agents/skills
-COPY skills /skills
+#COPY skills /skills
 
 # Entrypoint wrapper: relaunch persisted apps (apps restore) before opencode.
 COPY container/entrypoint.sh /usr/local/bin/opencode-entrypoint

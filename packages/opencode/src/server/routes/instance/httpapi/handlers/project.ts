@@ -30,6 +30,10 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
       return yield* svc.managedRoot()
     })
 
+    const managedStorage = Effect.fn("ProjectHttpApi.managedStorage")(function* () {
+      return yield* svc.managedStorage()
+    })
+
     const deleteManaged = Effect.fn("ProjectHttpApi.deleteManaged")(function* (ctx: {
       params: { workspaceID: string }
     }) {
@@ -97,6 +101,7 @@ export const projectHandlers = HttpApiBuilder.group(InstanceHttpApi, "project", 
       .handle("create", create)
       .handle("managed", managed)
       .handle("managedRoot", managedRoot)
+      .handle("managedStorage", managedStorage)
       .handle("deleteManaged", deleteManaged)
       .handle("current", current)
       .handle("initGit", initGit)

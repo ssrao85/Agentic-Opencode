@@ -59,6 +59,16 @@ export const ProjectApi = HttpApi.make("project")
             description: "Get the root directory that contains server-managed workspaces.",
           }),
         ),
+        HttpApiEndpoint.get("managedStorage", `${root}/managed/storage`, {
+          query: WorkspaceRoutingQuery,
+          success: described(Project.ManagedStorage, "Managed workspace storage"),
+        }).annotateMerge(
+          OpenApi.annotations({
+            identifier: "project.managedStorage",
+            summary: "Get managed workspace storage",
+            description: "Get filesystem storage capacity for the configured managed workspace path.",
+          }),
+        ),
         HttpApiEndpoint.delete("deleteManaged", `${root}/managed/:workspaceID`, {
           params: { workspaceID: Schema.String },
           query: WorkspaceRoutingQuery,
