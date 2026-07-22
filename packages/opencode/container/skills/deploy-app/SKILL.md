@@ -129,6 +129,8 @@ apps restore         # relaunch registered apps that aren't running (after a res
 - Bind apps to **127.0.0.1** only — they must be reachable solely through opencode,
   never on another interface.
 - After a **pod restart** the container automatically runs `apps restore` on
-  startup, so deployed apps come back up on their own; you can also run it
-  manually.
+  startup for `web` or `serve` mode, so deployed apps come back up on their own;
+  you can also run it manually. Set `OPENCODE_APPS_AUTO_RESTORE=false` to disable
+  it. The container starts `OPENCODE_SERVER_MODE=web` by default; set it to
+  `serve` to start that mode instead.
 - Multiple apps coexist — give each a distinct `<name>` and free port.

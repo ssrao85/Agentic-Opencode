@@ -61,5 +61,8 @@ explicit port (`apps run <name> <port> -- …`) to request a specific one.
 Detached apps stay up for the life of the pod. The registry (and each app's
 command + working dir) persists on the `/all-workspaces` volume, so the
 container entrypoint (`container/entrypoint.sh`) runs **`apps restore`**
-automatically when opencode starts in `web` mode — deployed apps come back up
-after a pod restart with no manual step. You can also run `apps restore` by hand.
+automatically when opencode starts in `web` or `serve` mode — deployed apps come
+back up after a pod restart with no manual step. You can also run `apps restore`
+by hand. Set `OPENCODE_APPS_AUTO_RESTORE=false` to disable this. The container
+starts `OPENCODE_SERVER_MODE=web` by default; set it to `serve` to start that
+mode instead.

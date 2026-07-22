@@ -36,7 +36,7 @@ RUN apk add --no-cache \
     krb5-libs \
     tzdata \
     ca-certificates \
-    dotnet8-sdk \
+    # dotnet8-sdk \
     chromium \
     nss \
     freetype \
@@ -169,6 +169,8 @@ COPY container/skills /.agents/skills
 # Entrypoint wrapper: relaunch persisted apps (apps restore) before opencode.
 COPY container/entrypoint.sh /usr/local/bin/opencode-entrypoint
 RUN chmod +x /usr/local/bin/opencode-entrypoint
+ENV OPENCODE_APPS_AUTO_RESTORE=true
+ENV OPENCODE_SERVER_MODE=web
 
 FROM base AS build-amd64
 COPY dist/opencode-linux-x64-baseline-musl/bin/opencode /usr/local/bin/opencode
@@ -187,8 +189,8 @@ RUN opencode --version \
     && uv --version \
     && node --version \
     && npm --version \
-    && dotnet --info \
-    && dotnet --list-sdks \
+    #&& dotnet --info \
+    #&& dotnet --list-sdks \
     && libreoffice --headless --version \
     && soffice --headless --version \
     && readpst -V
@@ -196,4 +198,4 @@ RUN opencode --version \
 EXPOSE 3000
 
 ENTRYPOINT ["opencode-entrypoint"]
-CMD ["web", "--hostname", "0.0.0.0", "--port", "3000"]
+CMD ["--hostname", "0.0.0.0", "--port", "3000"]
