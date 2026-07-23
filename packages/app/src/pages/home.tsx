@@ -161,7 +161,10 @@ function HomeDesign() {
   const directories = (project: LocalProject) => [project.worktree, ...(project.sandboxes ?? [])]
   const projectDirectories = createMemo(() => {
     const project = selectedProject()
-    if (!project) return projects().flatMap(directories)
+    if (!project) {
+      const fallback = newSessionProject()
+      return fallback ? directories(fallback) : []
+    }
     return directories(project)
   })
   const search = createMemo(() => state.search.trim())

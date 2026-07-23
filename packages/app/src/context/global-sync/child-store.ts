@@ -15,7 +15,7 @@ import {
 } from "./types"
 import { canDisposeDirectory, pickDirectoriesToEvict } from "./eviction"
 import { useQuery } from "@tanstack/solid-query"
-import { QueryOptionsApi } from "../server-sync"
+import type { QueryOptionsApi } from "../server-sync"
 import { directoryKey, type DirectoryKey } from "./utils"
 import { NormalizedProviderListResponse } from "@opencode-ai/ui/context"
 import type { ServerScope } from "@/utils/server-scope"
@@ -44,6 +44,7 @@ export function createChildStoreManager(input: {
   const ownerPins = new WeakMap<object, Set<string>>()
   const disposers = new Map<string, () => void>()
   const mcpDirectories = new Set<string>()
+  const queryToggles = new Map<string, (enabled: boolean) => void>()
   const mcpToggles = new Map<string, (enabled: boolean) => void>()
 
   const markKey = (key: DirectoryKey) => {
@@ -117,6 +118,7 @@ export function createChildStoreManager(input: {
     iconCache.delete(key)
     lifecycle.delete(key)
     mcpDirectories.delete(key)
+    queryToggles.delete(key)
     mcpToggles.delete(key)
     const dispose = disposers.get(key)
     if (dispose) {
@@ -181,12 +183,13 @@ export function createChildStoreManager(input: {
         createRoot((dispose) => {
           const initialMeta = meta[0].value
           const initialIcon = icon[0].value
+          const [queryEnabled, setQueryEnabled] = createSignal(false)
           const [mcpEnabled, setMcpEnabled] = createSignal(false)
 
-          const pathQuery = useQuery(() => input.queryOptions.path(key))
+          const pathQuery = useQuery(() => ({ ...input.queryOptions.path(key), enabled: queryEnabled() }))
           const mcpQuery = useQuery(() => ({ ...input.queryOptions.mcp(key), enabled: mcpEnabled() }))
-          const lspQuery = useQuery(() => input.queryOptions.lsp(key))
-          const providerQuery = useQuery(() => input.queryOptions.providers(key))
+          const lspQuery = useQuery(() => ({ ...input.queryOptions.lsp(key), enabled: queryEnabled() }))
+          const providerQuery = useQuery(() => ({ ...input.queryOptions.providers(key), enabled: queryEnabled() }))
 
           const child = createStore<State>({
             project: "",
@@ -241,6 +244,7 @@ export function createChildStoreManager(input: {
           })
           children[key] = child
           disposers.set(key, dispose)
+          queryToggles.set(key, setQueryEnabled)
           mcpToggles.set(key, setMcpEnabled)
 
           const onPersistedInit = (init: Promise<string> | string | null, run: () => void) => {
@@ -282,6 +286,7 @@ export function createChildStoreManager(input: {
     pinForOwner(key)
     if (options.mcp) enableMcp(directory, key, childStore)
     const shouldBootstrap = options.bootstrap ?? true
+    if (shouldBootstrap) queryToggles.get(key)?.(true)
     if (shouldBootstrap && childStore[0].status === "loading") {
       input.onBootstrap(directory)
     }
@@ -293,6 +298,7 @@ export function createChildStoreManager(input: {
     const childStore = ensureChild(directory)
     if (options.mcp) enableMcp(directory, key, childStore)
     const shouldBootstrap = options.bootstrap ?? true
+    if (shouldBootstrap) queryToggles.get(key)?.(true)
     if (shouldBootstrap && childStore[0].status === "loading") {
       input.onBootstrap(directory)
     }

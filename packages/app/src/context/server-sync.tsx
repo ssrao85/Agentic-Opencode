@@ -404,7 +404,8 @@ export function createServerSyncContextInner(serverSDK: ServerSDK) {
       })
       if (event.type === "server.connected" || event.type === "global.disposed") {
         if (recent) return
-        for (const directory of Object.keys(children.children)) {
+        for (const [directory, child] of Object.entries(children.children)) {
+          if (child[0].status === "loading") continue
           queue.push(directory)
         }
       }

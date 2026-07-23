@@ -214,7 +214,7 @@ export default function Layout(props: ParentProps) {
     active: () => state.hoverProject,
     el: () => state.nav?.querySelector<HTMLElement>("[data-component='sidebar-rail']") ?? state.nav,
     onActivate: (directory) => {
-      serverSync().child(directory)
+      serverSync().child(directory, { bootstrap: false })
       setState("hoverProject", directory)
     },
   })

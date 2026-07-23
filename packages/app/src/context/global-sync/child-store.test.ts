@@ -50,6 +50,17 @@ function createOwner(callback: (owner: Owner) => void) {
 
 beforeAll(async () => {
   mock.module("@tanstack/solid-query", () => ({
+    QueryClient: class {
+      fetchQuery(options: { queryFn: () => unknown }) {
+        return options.queryFn()
+      }
+      ensureQueryData(options: { queryFn: () => unknown }) {
+        return options.queryFn()
+      }
+    },
+    queryOptions: (options: unknown) => options,
+    useMutation: () => ({ isPending: false, mutateAsync: async () => undefined }),
+    useQueries: () => [],
     useQuery: (options: () => { queryKey?: unknown[]; enabled?: boolean }) => {
       querySingles.push(options)
       return {
@@ -65,6 +76,12 @@ beforeAll(async () => {
         },
       }
     },
+    useQueryClient: () => ({
+      fetchQuery(options: { queryFn: () => unknown }) {
+        return options.queryFn()
+      },
+      invalidateQueries() {},
+    }),
   }))
 
   createChildStoreManager = (await import("./child-store")).createChildStoreManager
@@ -107,6 +124,7 @@ describe("createChildStoreManager", () => {
 
   test("starts new child stores as loading and bootstraps them on first access", () => {
     const bootstraps: string[] = []
+    const offset = querySingles.length
     let manager: ReturnType<typeof createChildStoreManager> | undefined
 
     const dispose = createOwner((owner) => {
@@ -135,12 +153,19 @@ describe("createChildStoreManager", () => {
       expect(store.status).toBe("loading")
       expect(store.limit).toBe(5)
       expect(bootstraps).toEqual(["/project"])
+      expect(querySingles.slice(offset, offset + 4).map((query) => query().enabled)).toEqual([
+        true,
+        false,
+        true,
+        true,
+      ])
     } finally {
       dispose()
     }
   })
 
   test("provides the requested directory while the path query is pending", () => {
+    const offset = querySingles.length
     let manager: ReturnType<typeof createChildStoreManager> | undefined
 
     const dispose = createOwner((owner) => {
@@ -166,6 +191,12 @@ describe("createChildStoreManager", () => {
 
       expect(store.path.directory).toBe("/project")
       expect(store.path.worktree).toBe("")
+      expect(querySingles.slice(offset, offset + 4).map((query) => query().enabled)).toEqual([
+        false,
+        false,
+        false,
+        false,
+      ])
     } finally {
       dispose()
     }

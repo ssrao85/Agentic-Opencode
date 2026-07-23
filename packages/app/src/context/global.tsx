@@ -132,7 +132,6 @@ function createServerCtx(
       if (opened.has(workspace.directory)) continue
       projects.open(workspace.directory)
       opened.add(workspace.directory)
-      void sync.project.loadSessions(workspace.directory)
     }
   })
 
