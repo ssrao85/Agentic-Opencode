@@ -24,7 +24,7 @@ bun install
 
 docker build \
   -f packages/opencode/Dockerfile \
-  -t opencode-local-14 \
+  -t opencode-local-21 \
   packages/opencode
 ```
 
@@ -88,5 +88,36 @@ docker run --rm -it \
   -v /home/pragyan/opencode-test/.config:/.config \
   opencode-local-20:latest \
   web --hostname 0.0.0.0 --port 3000
+
+```
+
+
+
+```
+
+
+docker run --rm -it \
+  --user 1001:0 \
+  -p 3000:3000 \
+  -e OPENCODE_DB="opencode-feature-Auto-worksapce-path.db" \
+  -e OPENCODE_SERVER_PASSWORD="change-me" \
+  -e OPENCODE_APPS_BASE_URL="http://localhost:3000" \
+  -e OPENCODE_WORKSPACE_ROOT="/all-workspaces" \
+  -e STORAGE_REFRESH_INTERVAL_MS="60000" \
+  -e STORAGE_STAT_TIMEOUT_MS="5000" \
+  -e STORAGE_WARNING_PERCENT="20" \
+  -e STORAGE_CRITICAL_PERCENT="10" \
+  -e OPENCODE_APPS_AUTO_RESTORE="false" \
+  -e OPENCODE_SERVER_MODE="serve" \
+  -e GLOBAL_SKILLS_DIRETORY_SOURCE="/global-skills" \
+  -e GLOBAL_SKILLS_DIRETORY_DESTINATION="/.config/opencode/skills" \
+  -v /home/pragyan/opencode-test/all-workspaces:/all-workspaces \
+  -v /home/pragyan/opencode-test/.local:/.local \
+  -v /home/pragyan/opencode-test/.cache:/.cache \
+  -v /home/pragyan/opencode-test/.config:/.config \
+  -v /home/pragyan/opencode-test/global-skills:/global-skills \
+  opencode-local-22:latest \
+  web --hostname 0.0.0.0 --port 3000
+
 
 ```

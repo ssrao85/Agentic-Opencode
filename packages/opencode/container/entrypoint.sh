@@ -16,6 +16,24 @@ case "${1:-}" in
     ;;
 esac
 
+global_skills_source="${GLOBAL_SKILLS_DIRETORY_SOURCE:-}"
+global_skills_destination="${GLOBAL_SKILLS_DIRETORY_DESTINATION:-}"
+
+if [ -n "$global_skills_source" ] || [ -n "$global_skills_destination" ]; then
+  if [ -z "$global_skills_source" ] || [ -z "$global_skills_destination" ]; then
+    echo "GLOBAL_SKILLS_DIRETORY_SOURCE and GLOBAL_SKILLS_DIRETORY_DESTINATION must both be set to sync global skills." >&2
+    exit 1
+  fi
+
+  if [ ! -d "$global_skills_source" ]; then
+    echo "GLOBAL_SKILLS_DIRETORY_SOURCE is not a directory: $global_skills_source" >&2
+    exit 1
+  fi
+
+  mkdir -p "$global_skills_destination"
+  cp -R "$global_skills_source"/. "$global_skills_destination"/.
+fi
+
 auto_restore="$(printf '%s' "${OPENCODE_APPS_AUTO_RESTORE:-true}" | tr '[:upper:]' '[:lower:]')"
 case "$auto_restore:$1" in
   0:* | false:* | no:* | off:*)
