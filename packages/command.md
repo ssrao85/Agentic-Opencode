@@ -24,7 +24,7 @@ bun install
 
 docker build \
   -f packages/opencode/Dockerfile \
-  -t opencode-local-21 \
+  -t opencode-local-25 \
   packages/opencode
 ```
 
@@ -67,7 +67,6 @@ docker build --pull --no-cache \
   packages/opencode
 ```
 
-
 ```
 docker run --rm -it \
   --user 1001:0 \
@@ -88,15 +87,13 @@ docker run --rm -it \
   -v /home/pragyan/opencode-test/.config:/.config \
   opencode-local-20:latest \
   web --hostname 0.0.0.0 --port 3000
-
 ```
-
-
 
 ```
 
 
 docker run --rm -it \
+--add-host=host.docker.internal:host-gateway \
   --user 1001:0 \
   -p 3000:3000 \
   -e OPENCODE_DB="opencode-feature-Auto-worksapce-path.db" \
@@ -111,13 +108,15 @@ docker run --rm -it \
   -e OPENCODE_SERVER_MODE="serve" \
   -e GLOBAL_SKILLS_DIRETORY_SOURCE="/global-skills" \
   -e GLOBAL_SKILLS_DIRETORY_DESTINATION="/.config/opencode/skills" \
+  -e OPENCODE_PRINT_LOGS="1" \
+  -e OPENCODE_LOG_LEVEL="DEBUG" \
+  -e OPENCODE_CLUSTER_DEBUG="1" \
+  -e OPENCODE_SESSION_DEBUG="1" \
   -v /home/pragyan/opencode-test/all-workspaces:/all-workspaces \
   -v /home/pragyan/opencode-test/.local:/.local \
   -v /home/pragyan/opencode-test/.cache:/.cache \
   -v /home/pragyan/opencode-test/.config:/.config \
   -v /home/pragyan/opencode-test/global-skills:/global-skills \
-  opencode-local-22:latest \
+  opencode-local-25:latest \
   web --hostname 0.0.0.0 --port 3000
-
-
 ```

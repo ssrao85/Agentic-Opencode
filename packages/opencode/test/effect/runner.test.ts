@@ -57,6 +57,30 @@ describe("Runner", () => {
   )
 
   it.live(
+    "ensureRunning reports whether it created or reused the selected fiber",
+    Effect.gen(function* () {
+      const s = yield* Scope.Scope
+      const runner = Runner.make<string>(s)
+      const gate = yield* Deferred.make<void>()
+      const selections = yield* Ref.make<Runner.RunSelection[]>([])
+      const select = (selection: Runner.RunSelection) => Ref.update(selections, (items) => [...items, selection])
+
+      const first = yield* runner
+        .ensureRunning(Deferred.await(gate).pipe(Effect.as("shared")), select)
+        .pipe(Effect.forkChild)
+      yield* waitForState(runner, "Running")
+      const second = yield* runner.ensureRunning(Effect.succeed("ignored"), select).pipe(Effect.forkChild)
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(gate, undefined)
+
+      expect(yield* Fiber.join(first)).toBe("shared")
+      expect(yield* Fiber.join(second)).toBe("shared")
+      expect((yield* Ref.get(selections)).map((selection) => selection.type)).toEqual(["created", "reused"])
+      expect((yield* Ref.get(selections)).every((selection) => selection.fiberID !== undefined)).toBe(true)
+    }),
+  )
+
+  it.live(
     "concurrent callers all receive same error",
     Effect.gen(function* () {
       const s = yield* Scope.Scope

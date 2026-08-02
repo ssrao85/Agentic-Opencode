@@ -37,6 +37,7 @@ import {
 } from "../groups/session"
 import { PermissionNotFoundError } from "../errors"
 import * as SessionError from "./session-errors"
+import { SessionDiagnostic } from "@/session/diagnostic"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -294,10 +295,21 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      const messageID = ctx.payload.messageID ?? MessageID.ascending()
+      const diagnostic = SessionDiagnostic.make(ctx.params.sessionID, messageID)
+      yield* SessionDiagnostic.info("prompt received", "http.prompt.received", diagnostic, {
+        endpoint: "prompt",
+      })
+      const loaded = yield* requireSession(ctx.params.sessionID)
+      yield* SessionDiagnostic.info("session loaded", "http.session.loaded", diagnostic, {
+        endpoint: "prompt",
+        session_title: loaded.title,
+      })
       const message = yield* promptSvc
         .prompt({
           ...ctx.payload,
+          messageID,
+          diagnostic,
           sessionID: ctx.params.sessionID,
         })
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
@@ -310,8 +322,17 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+      const messageID = ctx.payload.messageID ?? MessageID.ascending()
+      const diagnostic = SessionDiagnostic.make(ctx.params.sessionID, messageID)
+      yield* SessionDiagnostic.info("prompt received", "http.prompt.received", diagnostic, {
+        endpoint: "prompt_async",
+      })
+      const loaded = yield* requireSession(ctx.params.sessionID)
+      yield* SessionDiagnostic.info("session loaded", "http.session.loaded", diagnostic, {
+        endpoint: "prompt_async",
+        session_title: loaded.title,
+      })
+      yield* promptSvc.prompt({ ...ctx.payload, messageID, diagnostic, sessionID: ctx.params.sessionID }).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })

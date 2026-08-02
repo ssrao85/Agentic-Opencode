@@ -31,6 +31,7 @@ import { ProviderV2 } from "@opencode-ai/core/provider"
 import * as DateTime from "effect/DateTime"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ToolOutput, Usage, type LLMEvent } from "@opencode-ai/llm"
+import { SessionDiagnostic } from "./diagnostic"
 
 const DOOM_LOOP_THRESHOLD = 3
 export type Result = "compact" | "stop" | "continue"
@@ -57,6 +58,7 @@ type Input = {
   assistantMessage: SessionV1.Assistant
   sessionID: SessionID
   model: Provider.Model
+  diagnostic?: SessionDiagnostic.Trace
 }
 
 export interface Interface {
@@ -108,6 +110,17 @@ export const layer = Layer.effect(
     const database = yield* Database.Service
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
+      const diagnostic =
+        input.diagnostic ??
+        SessionDiagnostic.current(input.sessionID) ??
+        SessionDiagnostic.withModel(
+          SessionDiagnostic.withAssistant(
+            SessionDiagnostic.make(input.sessionID, input.assistantMessage.parentID),
+            input.assistantMessage.id,
+          ),
+          input.model.providerID,
+          input.model.id,
+        )
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
@@ -915,6 +928,18 @@ export const layer = Layer.effect(
       })
 
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
+        yield* SessionDiagnostic.error("LLM processing failed", "llm.process.failed", diagnostic, {
+          ...SessionDiagnostic.streamCounters(diagnostic),
+          error_name: e instanceof Error ? e.name : "unknown",
+          error_message: errorMessage(e),
+          provider_fetches: SessionDiagnostic.transportStarts(diagnostic),
+        })
+        if (e instanceof SessionDiagnostic.SilentEmptyAssistantResponse) {
+          yield* SessionDiagnostic.error(e.name, "assistant.empty.detected", diagnostic, {
+            reason: e.reason,
+            provider_fetches: SessionDiagnostic.transportStarts(diagnostic),
+          })
+        }
         yield* Effect.logError("process", {
           "session.id": input.sessionID,
           messageID: input.assistantMessage.id,
@@ -964,20 +989,74 @@ export const layer = Layer.effect(
         })
         ctx.needsCompaction = false
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
+        yield* SessionDiagnostic.info("LLM process entered", "llm.process.entered", diagnostic)
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
+            const counters = {
+              normalized_events: 0,
+              text_deltas: 0,
+              text_characters: 0,
+              tool_calls: 0,
+              finish_events: 0,
+              provider_errors: 0,
+            }
             ctx.currentText = undefined
             ctx.currentTextID = undefined
             ctx.reasoningMap = {}
             yield* status.set(ctx.sessionID, { type: "busy" })
             const stream = llm.stream(streamInput)
+            yield* SessionDiagnostic.info("LLM stream constructed", "llm.stream.constructed", diagnostic)
+            const transportStarts = SessionDiagnostic.transportStarts(diagnostic)
+            yield* SessionDiagnostic.info("stream consumption started", "llm.stream.consumption.started", diagnostic, {
+              provider_fetch_count_before: transportStarts,
+            })
 
             yield* stream.pipe(
-              Stream.tap((event) => handleEvent(event)),
+              Stream.tap((event) =>
+                Effect.gen(function* () {
+                  counters.normalized_events++
+                  if (event.type === "text-delta") {
+                    counters.text_deltas++
+                    counters.text_characters += event.text.length
+                    if (counters.text_deltas === 1) {
+                      yield* SessionDiagnostic.info("first text event received", "llm.stream.first_text", diagnostic, {
+                        normalized_event_type: event.type,
+                        text_characters: event.text.length,
+                      })
+                    }
+                  }
+                  if (event.type === "tool-call") counters.tool_calls++
+                  if (event.type === "finish" || event.type === "step-finish") counters.finish_events++
+                  if (event.type === "provider-error") counters.provider_errors++
+                  yield* handleEvent(event)
+                }),
+              ),
               Stream.takeUntil(() => ctx.needsCompaction),
               Stream.runDrain,
             )
+            const providerFetches = SessionDiagnostic.transportStarts(diagnostic) - transportStarts
+            yield* SessionDiagnostic.info("stream completed", "llm.stream.completed", diagnostic, {
+              ...SessionDiagnostic.streamCounters(diagnostic),
+              ...counters,
+              provider_fetches: providerFetches,
+              finish: ctx.assistantMessage.finish ?? "",
+              has_error: !!ctx.assistantMessage.error,
+            })
+            if (!SessionDiagnostic.enabled()) return
+            if (providerFetches === 0) {
+              throw new SessionDiagnostic.SilentEmptyAssistantResponse(
+                "LLM processing returned without invoking provider fetch",
+              )
+            }
+            if (counters.normalized_events === 0) {
+              throw new SessionDiagnostic.SilentEmptyAssistantResponse("stream completed with zero events")
+            }
+            if (counters.text_characters === 0 && counters.tool_calls === 0 && !ctx.assistantMessage.error) {
+              throw new SessionDiagnostic.SilentEmptyAssistantResponse(
+                "assistant finishes with zero text and zero tool calls",
+              )
+            }
           }).pipe(
             Effect.onInterrupt(() =>
               Effect.gen(function* () {

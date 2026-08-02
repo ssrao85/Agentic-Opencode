@@ -18,6 +18,8 @@ import {
 } from "@opencode-ai/llm"
 import type { LLMClientShape } from "@opencode-ai/llm/route"
 import { LLMNative } from "./native-request"
+import type { EffectBridge } from "@/effect/bridge"
+import { SessionDiagnostic } from "../diagnostic"
 
 export type RuntimeStatus =
   | { readonly type: "supported"; readonly apiKey: string; readonly baseURL?: string }
@@ -41,6 +43,8 @@ type StreamInput = {
   readonly providerOptions?: Record<string, any>
   readonly headers: Record<string, string>
   readonly abort: AbortSignal
+  readonly diagnostic?: SessionDiagnostic.Trace
+  readonly bridge?: EffectBridge.Shape
 }
 
 export function status(input: Pick<StreamInput, "model" | "provider" | "auth">): RuntimeStatus {
@@ -139,10 +143,66 @@ export function stream(input: StreamInput): StreamResult {
     ),
   )
 
+  const diagnosticFetch =
+    SessionDiagnostic.enabled() && input.diagnostic && input.bridge
+      ? tracedFetch(fetch ?? globalThis.fetch, input)
+      : fetch
   return {
     ...current,
-    stream: fetch ? stream.pipe(Stream.provideService(FetchHttpClient.Fetch, fetch)) : stream,
+    stream: diagnosticFetch ? stream.pipe(Stream.provideService(FetchHttpClient.Fetch, diagnosticFetch)) : stream,
   }
+}
+
+function tracedFetch(fetch: typeof globalThis.fetch, input: StreamInput): typeof globalThis.fetch {
+  const wrapped = async (request: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(request instanceof Request ? request.headers : undefined)
+    new Headers(init?.headers).forEach((value, name) => headers.set(name, value))
+    const diagnostic = SessionDiagnostic.readTransportTrace(headers) ?? input.diagnostic
+    if (!diagnostic || !input.bridge) return fetch(request, init)
+    const body = await SessionDiagnostic.bodyText(request, init?.body).catch(() => "[unavailable]")
+    const startedAt = Date.now()
+    SessionDiagnostic.markTransportStart(diagnostic)
+    await input.bridge.promise(
+      SessionDiagnostic.info("llm.http.request.start", "llm.http.request.start", diagnostic, {
+        ...SessionDiagnostic.requestDetails(diagnostic),
+        method: init?.method ?? (request instanceof Request ? request.method : "POST"),
+        provider_url: SessionDiagnostic.redactURL(request),
+        headers: SessionDiagnostic.json(SessionDiagnostic.redactHeaders(headers)),
+        request_body: SessionDiagnostic.redactBody(body),
+        body_length: SessionDiagnostic.bodyLength(body),
+        body_sha256: SessionDiagnostic.sha256(body),
+        runtime: "native",
+      }),
+    )
+    const clean = SessionDiagnostic.stripTransportHeaders(headers)
+    const cleanRequest = request instanceof Request ? new Request(request, { headers: clean }) : request
+    return fetch(cleanRequest, { ...init, headers: clean }).then(
+      async (response) => {
+        await input.bridge!.promise(
+          SessionDiagnostic.info("llm.http.response", "llm.http.response", diagnostic, {
+            status: response.status,
+            status_text: response.statusText,
+            response_headers: SessionDiagnostic.json(SessionDiagnostic.redactHeaders(response.headers)),
+            transport_duration_ms: Date.now() - startedAt,
+            runtime: "native",
+          }),
+        )
+        return response
+      },
+      async (error) => {
+        await input.bridge!.promise(
+          SessionDiagnostic.error("llm.http.error", "llm.http.error", diagnostic, {
+            error_name: error instanceof Error ? error.name : "unknown",
+            error_message: error instanceof Error ? error.message : String(error),
+            transport_duration_ms: Date.now() - startedAt,
+            runtime: "native",
+          }),
+        )
+        throw error
+      },
+    )
+  }
+  return Object.assign(wrapped, { preconnect: fetch.preconnect })
 }
 
 function providerFetch(input: Pick<StreamInput, "provider" | "auth">): typeof globalThis.fetch | undefined {

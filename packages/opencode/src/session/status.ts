@@ -5,6 +5,7 @@ import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Effect, Layer, Context, Schema } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { SessionDiagnostic } from "./diagnostic"
 
 export const Info = Schema.Union([
   Schema.Struct({
@@ -77,6 +78,14 @@ export const layer = Layer.effect(
 
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
       const data = yield* InstanceState.get(state)
+      const diagnostic = SessionDiagnostic.current(sessionID)
+      if (diagnostic) {
+        yield* SessionDiagnostic.info("session status changed", "session.status.changed", diagnostic, {
+          previous_status: data.get(sessionID)?.type ?? "idle",
+          next_status: status.type,
+          status,
+        })
+      }
       yield* events.publish(Event.Status, { sessionID, status })
       if (status.type === "idle") {
         yield* events.publish(Event.Idle, { sessionID })

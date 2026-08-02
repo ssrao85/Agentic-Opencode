@@ -8,6 +8,8 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { EventApi } from "../groups/event"
+import { SessionDiagnostic } from "@/session/diagnostic"
+import { isRecord } from "@/util/record"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -37,6 +39,18 @@ function eventResponse(events: EventV2.Interface) {
           event.location?.directory === instance.directory &&
           (event.location.workspaceID === undefined || event.location.workspaceID === workspaceID),
       ),
+      Stream.tap((event) => {
+        const sessionID =
+          isRecord(event.data) && typeof event.data.sessionID === "string" ? event.data.sessionID : undefined
+        const diagnostic = sessionID ? SessionDiagnostic.readEventTrace(sessionID, event.metadata) : undefined
+        return diagnostic
+          ? SessionDiagnostic.info("SSE event emitted", "event.sse.emitted", diagnostic, {
+              event_id: event.id,
+              event_type: event.type,
+              event_sequence: event.seq ?? "",
+            })
+          : Effect.void
+      }),
       Stream.map((event) => ({ id: event.id, type: event.type, properties: event.data })),
     )
     const disposed = Stream.callback<{ id: string; type: string; properties: unknown }>((queue) => {

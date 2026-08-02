@@ -31,6 +31,7 @@ import { ModelV2 } from "@opencode-ai/core/model"
 import { ModelStatus } from "./model-status"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+import { SessionDiagnostic } from "@/session/diagnostic"
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
@@ -1129,6 +1130,7 @@ interface State {
   sdk: Map<string, BundledSDK>
   modelLoaders: Record<string, CustomModelLoader>
   varsLoaders: Record<string, CustomVarsLoader>
+  bridge: EffectBridge.Shape
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Provider") {}
@@ -1613,6 +1615,7 @@ export const layer = Layer.effect(
           sdk,
           modelLoaders,
           varsLoaders,
+          bridge,
         }
       }),
     )
@@ -1692,6 +1695,10 @@ export const layer = Layer.effect(
         options["fetch"] = async (input: any, init?: BunFetchRequestInit) => {
           const fetchFn = customFetch ?? fetch
           const opts = init ?? {}
+          const requestHeaders = new Headers(input instanceof Request ? input.headers : undefined)
+          new Headers(opts.headers).forEach((value, name) => requestHeaders.set(name, value))
+          const diagnostic = SessionDiagnostic.readTransportTrace(requestHeaders)
+          if (diagnostic) opts.headers = SessionDiagnostic.stripTransportHeaders(requestHeaders)
           const chunkAbortCtl = typeof chunkTimeout === "number" && chunkTimeout > 0 ? new AbortController() : undefined
           const headerTimeoutMs = headerTimeout === false ? undefined : headerTimeout
           const headerTimeoutCtl = typeof headerTimeoutMs === "number" ? timeoutController(headerTimeoutMs) : undefined
@@ -1706,11 +1713,59 @@ export const layer = Layer.effect(
           const combined = signals.length === 0 ? null : signals.length === 1 ? signals[0] : AbortSignal.any(signals)
           if (combined) opts.signal = combined
 
-          const res = await fetchFn(input, {
+          const body = diagnostic
+            ? await SessionDiagnostic.bodyText(input, opts.body as BodyInit | null | undefined).catch(
+                () => "[unavailable]",
+              )
+            : ""
+          const startedAt = Date.now()
+          if (diagnostic) {
+            SessionDiagnostic.markTransportStart(diagnostic)
+            await s.bridge.promise(
+              SessionDiagnostic.info("llm.http.request.start", "llm.http.request.start", diagnostic, {
+                ...SessionDiagnostic.requestDetails(diagnostic),
+                method: opts.method ?? (input instanceof Request ? input.method : "POST"),
+                provider_url: SessionDiagnostic.redactURL(input),
+                headers: SessionDiagnostic.json(SessionDiagnostic.redactHeaders(requestHeaders)),
+                request_body: SessionDiagnostic.redactBody(body),
+                body_length: SessionDiagnostic.bodyLength(body),
+                body_sha256: SessionDiagnostic.sha256(body),
+              }),
+            )
+          }
+
+          const request = diagnostic && input instanceof Request ? new Request(input, { headers: opts.headers }) : input
+          const res = await fetchFn(request, {
             ...opts,
             // @ts-ignore see here: https://github.com/oven-sh/bun/issues/16682
             timeout: false,
-          }).finally(() => headerTimeoutCtl?.clear())
+          })
+            .then(async (response: Response) => {
+              if (diagnostic) {
+                await s.bridge.promise(
+                  SessionDiagnostic.info("llm.http.response", "llm.http.response", diagnostic, {
+                    status: response.status,
+                    status_text: response.statusText,
+                    response_headers: SessionDiagnostic.json(SessionDiagnostic.redactHeaders(response.headers)),
+                    transport_duration_ms: Date.now() - startedAt,
+                  }),
+                )
+              }
+              return response
+            })
+            .catch(async (error: unknown) => {
+              if (diagnostic) {
+                await s.bridge.promise(
+                  SessionDiagnostic.error("llm.http.error", "llm.http.error", diagnostic, {
+                    error_name: error instanceof Error ? error.name : "unknown",
+                    error_message: error instanceof Error ? error.message : String(error),
+                    transport_duration_ms: Date.now() - startedAt,
+                  }),
+                )
+              }
+              throw error
+            })
+            .finally(() => headerTimeoutCtl?.clear())
 
           if (!chunkAbortCtl) return res
           return wrapSSE(res, chunkTimeout, chunkAbortCtl)

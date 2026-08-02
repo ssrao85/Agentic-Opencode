@@ -3,9 +3,19 @@ import { Cause, Deferred, Effect, Exit, Fiber, Latch, Schema, Scope, Synchronize
 export interface Runner<A, E = never> {
   readonly state: State<A, E>
   readonly busy: boolean
-  readonly ensureRunning: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  readonly ensureRunning: (
+    work: Effect.Effect<A, E>,
+    onSelect?: (selection: RunSelection) => Effect.Effect<void>,
+  ) => Effect.Effect<A, E>
   readonly startShell: (work: Effect.Effect<A, E>, ready?: Latch.Latch) => Effect.Effect<A, E | Busy>
   readonly cancel: Effect.Effect<void>
+}
+
+export type RunSelection = {
+  readonly type: "created" | "reused" | "queued-after-shell"
+  readonly runnerID: number
+  readonly fiberID?: number
+  readonly fiberStatus: "pending" | "running" | "completed"
 }
 
 export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCancelled", {}) {}
@@ -112,26 +122,55 @@ export const make = <A, E = never>(
       yield* Fiber.interrupt(shell.fiber)
     })
 
-  const ensureRunning = (work: Effect.Effect<A, E>) =>
+  const ensureRunning = (work: Effect.Effect<A, E>, onSelect?: (selection: RunSelection) => Effect.Effect<void>) =>
     SynchronizedRef.modifyEffect(
       ref,
       Effect.fnUntraced(function* (st) {
         switch (st._tag) {
           case "Running":
           case "ShellThenRun":
-            return [awaitDone(st.run.done), st] as const
+            return [
+              (
+                onSelect?.({
+                  type: "reused",
+                  runnerID: st.run.id,
+                  fiberID: "fiber" in st.run ? st.run.fiber.id : undefined,
+                  fiberStatus: "fiber" in st.run ? (st.run.fiber.pollUnsafe() ? "completed" : "running") : "pending",
+                }) ?? Effect.void
+              ).pipe(Effect.andThen(awaitDone(st.run.done))),
+              st,
+            ] as const
           case "Shell": {
             const run = {
               id: next(),
               done: yield* Deferred.make<A, E | Cancelled>(),
               work,
             } satisfies PendingHandle<A, E>
-            return [awaitDone(run.done), { _tag: "ShellThenRun", shell: st.shell, run }] as const
+            return [
+              (
+                onSelect?.({
+                  type: "queued-after-shell",
+                  runnerID: run.id,
+                  fiberStatus: "pending",
+                }) ?? Effect.void
+              ).pipe(Effect.andThen(awaitDone(run.done))),
+              { _tag: "ShellThenRun", shell: st.shell, run },
+            ] as const
           }
           case "Idle": {
             const done = yield* Deferred.make<A, E | Cancelled>()
             const run = yield* startRun(work, done)
-            return [awaitDone(done), { _tag: "Running", run }] as const
+            return [
+              (
+                onSelect?.({
+                  type: "created",
+                  runnerID: run.id,
+                  fiberID: run.fiber.id,
+                  fiberStatus: run.fiber.pollUnsafe() ? "completed" : "running",
+                }) ?? Effect.void
+              ).pipe(Effect.andThen(awaitDone(done))),
+              { _tag: "Running", run },
+            ] as const
           }
         }
       }),

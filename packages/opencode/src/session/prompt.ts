@@ -60,6 +60,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+import { SessionDiagnostic } from "./diagnostic"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -85,8 +86,10 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
-  readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
+  readonly prompt: (input: PromptRequest) => Effect.Effect<SessionV1.WithParts, Image.Error>
+  readonly loop: (
+    input: LoopInput & { readonly diagnostic?: SessionDiagnostic.Trace },
+  ) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
   readonly command: (input: CommandInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly resolvePromptParts: (template: string) => Effect.Effect<PromptInput["parts"]>
@@ -125,6 +128,7 @@ export const layer = Layer.effect(
     const flags = yield* RuntimeFlags.Service
     const database = yield* Database.Service
     const { db } = database
+    const diagnostics = new Map<string, SessionDiagnostic.Trace>()
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -179,6 +183,7 @@ export const layer = Layer.effect(
       history: SessionV1.WithParts[]
       providerID: ProviderV2.ID
       modelID: ModelV2.ID
+      diagnostic?: SessionDiagnostic.Trace
     }) {
       if (input.session.parentID) return
       if (!Session.isDefaultTitle(input.session.title)) return
@@ -217,6 +222,7 @@ export const layer = Layer.effect(
           sessionID: input.session.id,
           retries: 2,
           messages: [{ role: "user", content: "Generate a title for this conversation:\n" }, ...msgs],
+          diagnostic: input.diagnostic,
         })
         .pipe(
           Stream.filter(LLMEvent.is.textDelta),
@@ -1102,12 +1108,30 @@ export const layer = Layer.effect(
       return { info, parts }
     }, Effect.scoped)
 
-    const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
+    const prompt: (input: PromptRequest) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
-    )(function* (input: PromptInput) {
+    )(function* (input: PromptRequest) {
+      const messageID = input.messageID ?? MessageID.ascending()
+      const diagnostic = input.diagnostic ?? SessionDiagnostic.make(input.sessionID, messageID)
+      const next = { ...input, messageID }
+      if (SessionDiagnostic.enabled()) diagnostics.set(messageID, diagnostic)
+      yield* SessionDiagnostic.info("prompt received", "prompt.received", diagnostic, {
+        no_reply: input.noReply === true,
+      })
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      yield* SessionDiagnostic.info("session loaded", "session.loaded", diagnostic, {
+        session_title: session.title,
+        session_parent_id: session.parentID ?? "",
+      })
       yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
+      const message = yield* createUserMessage(next)
+      const messageIDTimestamp = SessionDiagnostic.idTimestamp(message.info.id)
+      yield* SessionDiagnostic.info("user message persisted", "message.user.persisted", diagnostic, {
+        part_count: message.parts.length,
+        message_created_at_ms: message.info.time.created,
+        message_id_timestamp_ms: messageIDTimestamp ?? "",
+        local_clock_minus_message_id_ms: messageIDTimestamp === undefined ? "" : Date.now() - messageIDTimestamp,
+      })
       yield* sessions.touch(input.sessionID)
 
       const permissions: PermissionV1.Rule[] = []
@@ -1119,8 +1143,11 @@ export const layer = Layer.effect(
         yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
       }
 
-      if (input.noReply === true) return message
-      return yield* loop({ sessionID: input.sessionID })
+      if (input.noReply === true) {
+        diagnostics.delete(messageID)
+        return message
+      }
+      return yield* loop({ sessionID: input.sessionID, diagnostic })
     })
 
     const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
@@ -1133,10 +1160,13 @@ export const layer = Layer.effect(
 
     const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
       function* (sessionID: SessionID) {
+        const initialDiagnostic = SessionDiagnostic.current(sessionID) ?? SessionDiagnostic.make(sessionID, "unknown")
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
+        let exitReason = "unknown"
         const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
+        yield* SessionDiagnostic.info("loop entered", "loop.entered", initialDiagnostic)
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
@@ -1145,10 +1175,62 @@ export const layer = Layer.effect(
           let msgs = yield* MessageV2.filterCompactedEffect(sessionID).pipe(
             Effect.provideService(Database.Service, database),
           )
+          yield* SessionDiagnostic.info("history loaded", "loop.history.loaded", initialDiagnostic, {
+            message_count: msgs.length,
+            requested_loop_step: step + 1,
+          })
 
           const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
+          const diagnostic = SessionDiagnostic.withStep(diagnostics.get(lastUser.id) ?? initialDiagnostic, step + 1)
+          const latestUserIDTimestamp = SessionDiagnostic.idTimestamp(lastUser.id)
+          const latestAssistantIDTimestamp = lastAssistant ? SessionDiagnostic.idTimestamp(lastAssistant.id) : undefined
+          const correlatedUser = msgs.find(
+            (message) => message.info.role === "user" && message.info.id === initialDiagnostic.userMessageID,
+          )
+          yield* SessionDiagnostic.info(
+            "latest user and assistant messages resolved",
+            "loop.messages.resolved",
+            diagnostic,
+            {
+              latest_user_message_id: lastUser.id,
+              correlated_user_message_present: !!correlatedUser,
+              correlated_user_selected_as_latest: lastUser.id === initialDiagnostic.userMessageID,
+              latest_user_created_at_ms: lastUser.time.created,
+              latest_user_id_timestamp_ms: latestUserIDTimestamp ?? "",
+              latest_assistant_message_id: lastAssistant?.id ?? "",
+              latest_assistant_parent_id: lastAssistant?.parentID ?? "",
+              latest_assistant_created_at_ms: lastAssistant?.time.created ?? "",
+              latest_assistant_id_timestamp_ms: latestAssistantIDTimestamp ?? "",
+              latest_assistant_finish: lastAssistant?.finish ?? "",
+              latest_finished_message_id: lastFinished?.id ?? "",
+              user_id_minus_assistant_id_time_ms:
+                latestUserIDTimestamp !== undefined && latestAssistantIDTimestamp !== undefined
+                  ? latestUserIDTimestamp - latestAssistantIDTimestamp
+                  : "",
+              user_created_minus_assistant_created_ms: lastAssistant
+                ? lastUser.time.created - lastAssistant.time.created
+                : "",
+              user_id_sorts_after_assistant: lastAssistant ? lastUser.id > lastAssistant.id : true,
+              task_count: tasks.length,
+            },
+          )
+          if (correlatedUser && lastUser.id !== initialDiagnostic.userMessageID) {
+            yield* SessionDiagnostic.warning(
+              "correlated prompt was not selected as latest user message",
+              "loop.messages.ordering_mismatch",
+              initialDiagnostic,
+              {
+                selected_user_message_id: lastUser.id,
+                correlated_user_message_id: initialDiagnostic.userMessageID,
+                selected_user_id_timestamp_ms: latestUserIDTimestamp ?? "",
+                correlated_user_id_timestamp_ms: SessionDiagnostic.idTimestamp(initialDiagnostic.userMessageID) ?? "",
+                selected_user_created_at_ms: lastUser.time.created,
+                correlated_user_created_at_ms: correlatedUser.info.time.created,
+              },
+            )
+          }
 
           const lastAssistantMsg = msgs.findLast(
             (msg) => msg.info.role === "assistant" && msg.info.id === lastAssistant?.id,
@@ -1163,6 +1245,7 @@ export const layer = Layer.effect(
 
           if (
             lastAssistant?.finish &&
+            lastAssistant.parentID === lastUser.id &&
             !["tool-calls"].includes(lastAssistant.finish) &&
             !hasToolCalls &&
             lastUser.id < lastAssistant.id
@@ -1179,6 +1262,12 @@ export const layer = Layer.effect(
               })
             }
             yield* Effect.logInfo("exiting loop", { "session.id": sessionID })
+            exitReason = "latest_assistant_already_finished"
+            yield* SessionDiagnostic.info("loop exit decision", "loop.exit.decision", diagnostic, {
+              decision: "break",
+              reason: exitReason,
+              assistant_message_id: lastAssistant.id,
+            })
             break
           }
 
@@ -1189,6 +1278,7 @@ export const layer = Layer.effect(
               modelID: lastUser.model.modelID,
               providerID: lastUser.model.providerID,
               history: msgs,
+              diagnostic,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
           const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
@@ -1207,7 +1297,14 @@ export const layer = Layer.effect(
               auto: task.auto,
               overflow: task.overflow,
             })
-            if (result === "stop") break
+            if (result === "stop") {
+              exitReason = "compaction_stop"
+              yield* SessionDiagnostic.info("loop exit decision", "loop.exit.decision", diagnostic, {
+                decision: "break",
+                reason: exitReason,
+              })
+              break
+            }
             continue
           }
 
@@ -1252,6 +1349,12 @@ export const layer = Layer.effect(
             sessionID,
           }
           yield* sessions.updateMessage(msg)
+          const assistantDiagnostic = SessionDiagnostic.withModel(
+            SessionDiagnostic.withAssistant(diagnostic, msg.id),
+            model.providerID,
+            model.id,
+          )
+          yield* SessionDiagnostic.info("assistant message created", "message.assistant.created", assistantDiagnostic)
 
           const finalizeInterruptedAssistant = Effect.gen(function* () {
             if (msg.time.completed) return
@@ -1268,8 +1371,10 @@ export const layer = Layer.effect(
               assistantMessage: msg,
               sessionID,
               model,
+              diagnostic: assistantDiagnostic,
             })
             .pipe(Effect.onInterrupt(() => finalizeInterruptedAssistant))
+          yield* SessionDiagnostic.info("processor created", "processor.created", assistantDiagnostic)
 
           const outcome: "break" | "continue" = yield* Effect.gen(function* () {
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
@@ -1291,6 +1396,10 @@ export const layer = Layer.effect(
               Effect.provideService(MCP.Service, mcp),
               Effect.provideService(Truncate.Service, truncate),
             )
+            yield* SessionDiagnostic.info("tools resolved", "tools.resolved", assistantDiagnostic, {
+              tool_count: Object.keys(tools).length,
+              tool_names: Object.keys(tools),
+            })
 
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
@@ -1333,6 +1442,10 @@ export const layer = Layer.effect(
             const system = [...env, ...instructions, ...(skills ? [skills] : [])]
             const format = lastUser.format ?? { type: "text" as const }
             if (format.type === "json_schema") system.push(STRUCTURED_OUTPUT_SYSTEM_PROMPT)
+            yield* SessionDiagnostic.info("system context built", "system.context.built", assistantDiagnostic, {
+              system_prompt_count: system.length,
+              model_message_count: modelMsgs.length,
+            })
             const result = yield* handle.process({
               user: lastUser,
               agent,
@@ -1344,6 +1457,7 @@ export const layer = Layer.effect(
               tools,
               model,
               toolChoice: format.type === "json_schema" ? "required" : undefined,
+              diagnostic: assistantDiagnostic,
             })
 
             if (structured !== undefined) {
@@ -1392,19 +1506,84 @@ export const layer = Layer.effect(
             Effect.ensuring(instruction.clear(handle.message.id)),
             Effect.onInterrupt(() => finalizeInterruptedAssistant),
           )
-          if (outcome === "break") break
+          yield* SessionDiagnostic.info("loop exit decision", "loop.exit.decision", assistantDiagnostic, {
+            decision: outcome,
+            processor_finish: handle.message.finish ?? "",
+            processor_error: handle.message.error ?? "",
+          })
+          if (outcome === "break") {
+            exitReason = handle.message.error
+              ? "assistant_error"
+              : `assistant_finish_${handle.message.finish ?? "unknown"}`
+            break
+          }
           continue
         }
 
         yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
-        return yield* lastAssistant(sessionID)
+        const result = yield* lastAssistant(sessionID)
+        const diagnostic = SessionDiagnostic.withAssistant(
+          diagnostics.get(result.info.role === "assistant" ? result.info.parentID : initialDiagnostic.userMessageID) ??
+            initialDiagnostic,
+          result.info.id,
+        )
+        const textCharacters = result.parts.reduce(
+          (total, part) => total + (part.type === "text" ? part.text.length : 0),
+          0,
+        )
+        const toolCalls = result.parts.filter((part) => part.type === "tool").length
+        if (result.info.role === "assistant" && textCharacters === 0 && toolCalls === 0 && !result.info.error) {
+          const error = new SessionDiagnostic.SilentEmptyAssistantResponse(
+            "loop exits with no assistant output and no stored error",
+          )
+          yield* SessionDiagnostic.error(error.name, "loop.exit.empty", diagnostic, {
+            reason: error.reason,
+            exit_reason: exitReason,
+            finish: result.info.finish ?? "",
+          })
+        }
+        yield* SessionDiagnostic.info("assistant finalized", "assistant.finalized", diagnostic, {
+          exit_reason: exitReason,
+          text_characters: textCharacters,
+          tool_calls: toolCalls,
+          finish: result.info.role === "assistant" ? (result.info.finish ?? "") : "",
+          has_error: result.info.role === "assistant" && !!result.info.error,
+        })
+        if (result.info.role === "assistant") diagnostics.delete(result.info.parentID)
+        return result
       },
     )
 
-    const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
-      input: LoopInput,
+    const loop: (
+      input: LoopInput & { readonly diagnostic?: SessionDiagnostic.Trace },
+    ) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
+      input: LoopInput & { readonly diagnostic?: SessionDiagnostic.Trace },
     ) {
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      const diagnostic =
+        input.diagnostic ??
+        SessionDiagnostic.current(input.sessionID) ??
+        SessionDiagnostic.make(input.sessionID, "unknown")
+      const result = yield* state.ensureRunning(
+        input.sessionID,
+        diagnostic,
+        lastAssistant(input.sessionID),
+        runLoop(input.sessionID),
+      )
+      if (
+        result.info.role === "assistant" &&
+        diagnostic.userMessageID !== "unknown" &&
+        result.info.parentID !== diagnostic.userMessageID
+      ) {
+        const error = new SessionDiagnostic.SilentEmptyAssistantResponse(
+          "ensureRunning returned an assistant for a different user prompt",
+        )
+        yield* SessionDiagnostic.error(error.name, "run_state.result.mismatch", diagnostic, {
+          reason: error.reason,
+          stored_assistant_result_id: result.info.id,
+          stored_assistant_parent_id: result.info.parentID,
+        })
+      }
+      return result
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
@@ -1614,6 +1793,7 @@ export const PromptInput = Schema.Struct({
   ),
 })
 export type PromptInput = Schema.Schema.Type<typeof PromptInput>
+export type PromptRequest = PromptInput & { readonly diagnostic?: SessionDiagnostic.Trace }
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,

@@ -11,6 +11,8 @@ import "@opencode-ai/core/account"
 import "@opencode-ai/core/catalog"
 import "@opencode-ai/core/session/event"
 import { Context, Effect, Layer } from "effect"
+import { SessionDiagnostic } from "@/session/diagnostic"
+import { isRecord } from "@/util/record"
 
 export class Service extends Context.Service<Service, EventV2.Interface>()("@opencode/EventV2Bridge") {}
 
@@ -21,12 +23,23 @@ export const layer = Layer.effect(
 
     const publish: EventV2.Interface["publish"] = (definition, data, options) =>
       Effect.gen(function* () {
-        if (options?.location) return yield* events.publish(definition, data, options)
+        const sessionID = isRecord(data) && typeof data.sessionID === "string" ? data.sessionID : undefined
+        const diagnostic = SessionDiagnostic.enabled() && sessionID ? SessionDiagnostic.current(sessionID) : undefined
+        if (diagnostic) {
+          yield* SessionDiagnostic.info("event publish boundary", "event.publish", diagnostic, {
+            event_type: definition.type,
+            explicit_location: !!options?.location,
+          })
+        }
+        const next = diagnostic
+          ? { ...options, metadata: { ...options?.metadata, ...SessionDiagnostic.eventMetadata(diagnostic) } }
+          : options
+        if (next?.location) return yield* events.publish(definition, data, next)
         const ctx = yield* InstanceRef
-        if (!ctx) return yield* events.publish(definition, data, options)
+        if (!ctx) return yield* events.publish(definition, data, next)
         const workspaceID = yield* WorkspaceRef
         return yield* events.publish(definition, data, {
-          ...options,
+          ...next,
           location: new Location.Info({
             directory: AbsolutePath.make(ctx.directory),
             ...(workspaceID ? { workspaceID } : {}),
@@ -37,6 +50,20 @@ export const layer = Layer.effect(
 
     const unsubscribe = yield* events.listen((event) =>
       Effect.gen(function* () {
+        const sessionID =
+          isRecord(event.data) && typeof event.data.sessionID === "string" ? event.data.sessionID : undefined
+        const diagnostic =
+          SessionDiagnostic.enabled() && sessionID
+            ? (SessionDiagnostic.readEventTrace(sessionID, event.metadata) ?? SessionDiagnostic.current(sessionID))
+            : undefined
+        if (diagnostic) {
+          yield* SessionDiagnostic.info("event bridge received", "event.bridge.received", diagnostic, {
+            event_id: event.id,
+            event_type: event.type,
+            event_sequence: event.seq ?? "",
+            event_version: event.version ?? "",
+          })
+        }
         const ctx = yield* InstanceRef
         const workspaceID = (yield* WorkspaceRef) ?? event.location?.workspaceID
         GlobalBus.emit("event", {

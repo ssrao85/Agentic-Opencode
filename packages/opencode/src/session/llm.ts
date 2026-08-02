@@ -29,6 +29,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { LLMAISDK } from "./llm/ai-sdk"
 import { LLMNativeRuntime } from "./llm/native-runtime"
 import { LLMRequestPrep } from "./llm/request"
+import { SessionDiagnostic } from "./diagnostic"
 
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 
@@ -45,6 +46,7 @@ export type StreamInput = {
   tools: Record<string, Tool>
   retries?: number
   toolChoice?: "auto" | "required" | "none"
+  diagnostic?: SessionDiagnostic.Trace
 }
 
 export type StreamRequest = StreamInput & {
@@ -83,6 +85,11 @@ const live: Layer.Layer<
     const flags = yield* RuntimeFlags.Service
 
     const run = Effect.fn("LLM.run")(function* (input: StreamRequest) {
+      const diagnostic = SessionDiagnostic.withModel(
+        input.diagnostic ?? SessionDiagnostic.make(input.sessionID, input.user.id),
+        input.model.providerID,
+        input.model.id,
+      )
       yield* Effect.logInfo("stream", {
         providerID: input.model.providerID,
         modelID: input.model.id,
@@ -111,6 +118,54 @@ const live: Layer.Layer<
         flags,
         isWorkflow,
       })
+      Object.assign(prepared.headers, SessionDiagnostic.transportHeaders(diagnostic))
+      if (SessionDiagnostic.enabled()) {
+        const requestBody = SessionDiagnostic.json({
+          system: prepared.system,
+          messages: prepared.messages,
+          tools: Object.fromEntries(
+            Object.entries(prepared.tools).map(([name, item]) => [
+              name,
+              {
+                description: item.description,
+                inputSchema: item.inputSchema,
+              },
+            ]),
+          ),
+          toolChoice: input.toolChoice,
+          temperature: prepared.params.temperature,
+          topP: prepared.params.topP,
+          topK: prepared.params.topK,
+          maxOutputTokens: prepared.params.maxOutputTokens,
+          providerOptions: ProviderTransform.providerOptions(input.model, prepared.params.options),
+        })
+        const details = {
+          system_prompts: SessionDiagnostic.json(prepared.system),
+          model_messages_and_roles: prepared.messages.map((message) => message.role),
+          full_message_content: SessionDiagnostic.json(prepared.messages),
+          provider_url: SessionDiagnostic.redactURL(
+            typeof item.options.baseURL === "string" ? item.options.baseURL : input.model.api.url,
+          ),
+          tools: SessionDiagnostic.json(
+            Object.fromEntries(
+              Object.entries(prepared.tools).map(([name, tool]) => [
+                name,
+                { description: tool.description, inputSchema: tool.inputSchema },
+              ]),
+            ),
+          ),
+          tool_choice: input.toolChoice ?? "auto",
+          temperature: prepared.params.temperature ?? "",
+          token_limit: prepared.params.maxOutputTokens ?? "",
+          provider_options: SessionDiagnostic.json(prepared.params.options),
+          request_headers: SessionDiagnostic.json(SessionDiagnostic.redactHeaders(new Headers(prepared.headers))),
+          request_body: requestBody,
+          body_length: SessionDiagnostic.bodyLength(requestBody),
+          body_sha256: SessionDiagnostic.sha256(requestBody),
+        }
+        SessionDiagnostic.registerRequest(diagnostic, details)
+        yield* SessionDiagnostic.info("request prepared", "llm.request.prepared", diagnostic, details)
+      }
 
       // Wire up toolExecutor for DWS workflow models so that tool calls
       // from the workflow service are executed via opencode's tool system
@@ -239,6 +294,8 @@ const live: Layer.Layer<
           providerOptions: prepared.params.options,
           headers: prepared.headers,
           abort: input.abort,
+          diagnostic,
+          bridge,
         })
         if (native.type === "supported") {
           yield* Effect.logInfo("llm runtime selected", {
@@ -249,6 +306,7 @@ const live: Layer.Layer<
           return {
             type: "native" as const,
             stream: native.stream,
+            diagnostic,
           }
         }
         yield* Effect.logInfo("llm runtime selected", {
@@ -275,8 +333,12 @@ const live: Layer.Layer<
       })
       // Default runtime path: AI SDK owns provider execution and tool dispatch;
       // LLMAISDK.toLLMEvents below normalizes fullStream parts for the processor.
+      yield* SessionDiagnostic.info("LLM stream constructed", "llm.stream.constructed", diagnostic, {
+        runtime: "ai-sdk",
+      })
       return {
         type: "ai-sdk" as const,
+        diagnostic,
         result: streamText({
           onError(error) {
             bridge.fork(
@@ -338,6 +400,48 @@ const live: Layer.Layer<
                   }
                   return args.params
                 },
+                async wrapStream(args) {
+                  if (!SessionDiagnostic.enabled()) return args.doStream()
+                  const startedAt = Date.now()
+                  await bridge.promise(
+                    SessionDiagnostic.info(
+                      "LLM provider execution entered",
+                      "llm.provider.execution.entered",
+                      diagnostic,
+                      {
+                        provider_execution_lazy_boundary: true,
+                      },
+                    ),
+                  )
+                  try {
+                    const response = await args.doStream()
+                    await bridge.promise(
+                      SessionDiagnostic.info(
+                        "LLM provider stream returned",
+                        "llm.provider.execution.returned",
+                        diagnostic,
+                        {
+                          provider_execution_duration_ms: Date.now() - startedAt,
+                        },
+                      ),
+                    )
+                    return response
+                  } catch (error) {
+                    await bridge.promise(
+                      SessionDiagnostic.error(
+                        "LLM provider execution failed",
+                        "llm.provider.execution.failed",
+                        diagnostic,
+                        {
+                          error_name: error instanceof Error ? error.name : "unknown",
+                          error_message: error instanceof Error ? error.message : String(error),
+                          provider_execution_duration_ms: Date.now() - startedAt,
+                        },
+                      ),
+                    )
+                    throw error
+                  }
+                },
               },
             ],
           }),
@@ -364,17 +468,102 @@ const live: Layer.Layer<
             )
 
             const result = yield* run({ ...input, abort: ctrl.signal })
+            const diagnostic = result.diagnostic
 
-            if (result.type === "native") return result.stream
+            if (result.type === "native") {
+              const counters = { raw: 0, normalized: 0, text: 0, providerErrors: 0 }
+              return result.stream.pipe(
+                Stream.tap((event) =>
+                  Effect.gen(function* () {
+                    counters.raw++
+                    counters.normalized++
+                    if (event.type === "text-delta") counters.text++
+                    if (event.type === "provider-error") counters.providerErrors++
+                    if (counters.raw === 1) {
+                      yield* SessionDiagnostic.info("first raw event received", "llm.stream.first_raw", diagnostic, {
+                        raw_event_type: event.type,
+                        runtime: "native",
+                      })
+                    }
+                  }),
+                ),
+                Stream.ensuring(
+                  Effect.suspend(() => {
+                    SessionDiagnostic.registerStreamCounters(diagnostic, {
+                      raw_stream_events: counters.raw,
+                      normalized_events: counters.normalized,
+                      text_deltas: counters.text,
+                      provider_errors: counters.providerErrors,
+                    })
+                    return (counters.raw === 0 ? SessionDiagnostic.error : SessionDiagnostic.info)(
+                      counters.raw === 0 ? "SilentEmptyAssistantResponse" : "LLM normalized stream completed",
+                      "llm.stream.normalized.completed",
+                      diagnostic,
+                      {
+                        reason: counters.raw === 0 ? "stream completed with zero raw events" : "",
+                        raw_stream_events: counters.raw,
+                        normalized_events: counters.normalized,
+                        text_deltas: counters.text,
+                        provider_errors: counters.providerErrors,
+                        runtime: "native",
+                      },
+                    )
+                  }),
+                ),
+              )
+            }
 
             // Adapter seam: both runtimes expose the same LLMEvent stream. Native
             // already returns one; AI SDK streams are converted here.
             const state = LLMAISDK.adapterState()
+            const counters = { raw: 0, normalized: 0, text: 0, providerErrors: 0 }
             return Stream.fromAsyncIterable(result.result.fullStream, (e) =>
               e instanceof Error ? e : new Error(String(e)),
             ).pipe(
+              Stream.tap((event) =>
+                Effect.gen(function* () {
+                  counters.raw++
+                  if (event.type === "error") counters.providerErrors++
+                  if (counters.raw === 1) {
+                    yield* SessionDiagnostic.info("first raw event received", "llm.stream.first_raw", diagnostic, {
+                      raw_event_type: event.type,
+                      runtime: "ai-sdk",
+                    })
+                  }
+                }),
+              ),
               Stream.mapEffect((event) => LLMAISDK.toLLMEvents(state, event)),
               Stream.flatMap((events) => Stream.fromIterable(events)),
+              Stream.tap((event) =>
+                Effect.sync(() => {
+                  counters.normalized++
+                  if (event.type === "text-delta") counters.text++
+                  if (event.type === "provider-error") counters.providerErrors++
+                }),
+              ),
+              Stream.ensuring(
+                Effect.suspend(() => {
+                  SessionDiagnostic.registerStreamCounters(diagnostic, {
+                    raw_stream_events: counters.raw,
+                    normalized_events: counters.normalized,
+                    text_deltas: counters.text,
+                    provider_errors: counters.providerErrors,
+                  })
+                  return (counters.raw === 0 ? SessionDiagnostic.error : SessionDiagnostic.info)(
+                    counters.raw === 0 ? "SilentEmptyAssistantResponse" : "LLM normalized stream completed",
+                    "llm.stream.normalized.completed",
+                    diagnostic,
+                    {
+                      reason: counters.raw === 0 ? "stream completed with zero raw events" : "",
+                      raw_stream_events: counters.raw,
+                      normalized_events: counters.normalized,
+                      text_deltas: counters.text,
+                      provider_errors: counters.providerErrors,
+                      runtime: "ai-sdk",
+                    },
+                  )
+                }),
+              ),
             )
           }),
         ),
