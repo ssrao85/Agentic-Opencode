@@ -110,17 +110,16 @@ export const layer = Layer.effect(
     const database = yield* Database.Service
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
-      const diagnostic =
-        input.diagnostic ??
-        SessionDiagnostic.current(input.sessionID) ??
-        SessionDiagnostic.withModel(
-          SessionDiagnostic.withAssistant(
+      const diagnostic = SessionDiagnostic.withModel(
+        SessionDiagnostic.withAssistant(
+          input.diagnostic ??
+            SessionDiagnostic.current(input.sessionID) ??
             SessionDiagnostic.make(input.sessionID, input.assistantMessage.parentID),
-            input.assistantMessage.id,
-          ),
-          input.model.providerID,
-          input.model.id,
-        )
+          input.assistantMessage.id,
+        ),
+        input.model.providerID,
+        input.model.id,
+      )
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
@@ -1005,7 +1004,7 @@ export const layer = Layer.effect(
             ctx.currentTextID = undefined
             ctx.reasoningMap = {}
             yield* status.set(ctx.sessionID, { type: "busy" })
-            const stream = llm.stream(streamInput)
+            const stream = llm.stream({ ...streamInput, diagnostic })
             yield* SessionDiagnostic.info("LLM stream constructed", "llm.stream.constructed", diagnostic)
             const transportStarts = SessionDiagnostic.transportStarts(diagnostic)
             yield* SessionDiagnostic.info("stream consumption started", "llm.stream.consumption.started", diagnostic, {

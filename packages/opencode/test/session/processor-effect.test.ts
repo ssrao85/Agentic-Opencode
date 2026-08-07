@@ -287,6 +287,54 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
   ),
 )
 
+it.live("session.processor uses one diagnostic trace through provider transport", () =>
+  Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const previous = process.env.OPENCODE_SESSION_DEBUG
+      process.env.OPENCODE_SESSION_DEBUG = "1"
+      return previous
+    }),
+    () =>
+      provideTmpdirServer(
+        ({ dir, llm }) =>
+          Effect.gen(function* () {
+            const { processors, session, provider } = yield* boot()
+
+            yield* llm.text("hello")
+
+            const chat = yield* session.create({})
+            const parent = yield* user(chat.id, "hi")
+            const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+            const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+            const handle = yield* processors.create({
+              assistantMessage: msg,
+              sessionID: chat.id,
+              model: mdl,
+            })
+
+            const value = yield* handle.process({
+              user: parent,
+              sessionID: chat.id,
+              model: mdl,
+              agent: agent(),
+              system: [],
+              messages: [{ role: "user", content: "hi" }],
+              tools: {},
+            })
+
+            expect(value).toBe("continue")
+            expect(yield* llm.calls).toBe(1)
+          }),
+        { config: (url) => providerCfg(url) },
+      ),
+    (previous) =>
+      Effect.sync(() => {
+        if (previous === undefined) delete process.env.OPENCODE_SESSION_DEBUG
+        else process.env.OPENCODE_SESSION_DEBUG = previous
+      }),
+  ),
+)
+
 it.live("session.processor effect tests preserve text start time", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
