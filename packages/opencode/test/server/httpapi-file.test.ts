@@ -1,12 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { Context } from "effect"
+import { ConfigProvider, Context, Effect, Layer } from "effect"
+import { HttpRouter } from "effect/unstable/http"
+import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import path from "path"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
-import { FilePaths, MAX_FILE_UPLOAD_BYTES } from "../../src/server/routes/instance/httpapi/groups/file"
+import { FilePaths } from "../../src/server/routes/instance/httpapi/groups/file"
 import { resetDatabase } from "../fixture/db"
-import { disposeAllInstances, tmpdir } from "../fixture/fixture"
+import { disposeAllInstances, tmpdir, tmpdirScoped } from "../fixture/fixture"
+import { testEffect } from "../lib/effect"
 
 const context = Context.empty() as Context.Context<unknown>
+const it = testEffect(CrossSpawnSpawner.defaultLayer)
 
 function request(route: string, directory: string, query?: Record<string, string>, init?: RequestInit) {
   const url = new URL(`http://localhost${route}`)
@@ -131,7 +135,7 @@ describe("file HttpApi", () => {
       FilePaths.upload,
       tmp.path,
       { filename: "large.bin" },
-      { method: "POST", body: new Uint8Array(MAX_FILE_UPLOAD_BYTES + 1) },
+      { method: "POST", body: new Uint8Array(20 * 1024 * 1024 + 1) },
     )
     expect(oversized.status).toBe(400)
 
@@ -145,6 +149,47 @@ describe("file HttpApi", () => {
     expect(escaping.status).toBe(400)
     expect(await Bun.file(path.join(outside.path, "escape.bin")).exists()).toBe(false)
   })
+
+  for (const limit of [4, 20 * 1024 * 1024 + 1]) {
+    it.live(`enforces the configured upload limit of ${limit} bytes`, () =>
+      Effect.gen(function* () {
+        const tmp = yield* tmpdirScoped({ git: true })
+        const app = yield* Effect.acquireRelease(
+          Effect.sync(() =>
+            HttpRouter.toWebHandler(
+              HttpApiApp.routes.pipe(
+                Layer.provide(
+                  ConfigProvider.layer(ConfigProvider.fromUnknown({ OPENCODE_MAX_FILE_UPLOAD_BYTES: String(limit) })),
+                ),
+              ),
+              { disableLogger: true },
+            ),
+          ),
+          (app) => Effect.promise(() => app.dispose()),
+        )
+
+        for (const size of [limit, limit + 1]) {
+          const url = new URL(`http://localhost${FilePaths.upload}`)
+          url.searchParams.set("filename", `${size}.bin`)
+          const response = yield* Effect.promise(() =>
+            Promise.resolve(
+              app.handler(
+                new Request(url, {
+                  method: "POST",
+                  headers: { "x-opencode-directory": tmp, "content-type": "application/octet-stream" },
+                  body: new Uint8Array(size),
+                }),
+                context,
+              ),
+            ),
+          )
+
+          expect(response.status).toBe(size === limit ? 200 : 400)
+          expect(yield* Effect.promise(() => Bun.file(path.join(tmp, `${size}.bin`)).exists())).toBe(size === limit)
+        }
+      }),
+    )
+  }
 
   test("serves search endpoints", async () => {
     await using tmp = await tmpdir({ git: true })

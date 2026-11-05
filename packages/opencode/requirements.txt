@@ -14,10 +14,12 @@ openpyxl
 xlsxwriter
 python-pptx
 python-docx
+pdf2image
 docxtpl
 reportlab
 pypdf
 pdfplumber
+pymupdf
 markdown
 pypandoc
 sqlalchemy
@@ -32,3 +34,4 @@ python-multipart
 python-dotenv
 markitdown[all]
 Faker
+weasyprint

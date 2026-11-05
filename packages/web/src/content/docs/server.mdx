@@ -44,6 +44,18 @@ OPENCODE_SERVER_PASSWORD=your-password opencode serve
 
 ---
 
+### File upload limit
+
+The `/file/upload` endpoint accepts files up to 20 MiB (20,971,520 bytes) by default. Set `OPENCODE_MAX_FILE_UPLOAD_BYTES` before starting the server to change this limit:
+
+```bash
+OPENCODE_MAX_FILE_UPLOAD_BYTES=52428800 opencode serve
+```
+
+This example allows files up to 50 MiB. The value must be a positive integer in bytes; unset or invalid values use the default. Files larger than the limit return HTTP 400.
+
+---
+
 ### How it works
 
 When you run `opencode` it starts a TUI and a server. Where the TUI is the

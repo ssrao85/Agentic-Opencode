@@ -46,11 +46,17 @@ RUN apk add --no-cache \
     libreoffice-writer \
     libreoffice-calc \
     libreoffice-impress \
+    poppler-utils \
     fontconfig \
     font-dejavu \
     font-liberation \
     font-noto \
     font-noto-cjk \
+    pango \
+    harfbuzz \
+    libffi-dev \
+    libjpeg-turbo-dev \
+    openjpeg-dev \
     openjdk17-jre-headless
 
 
@@ -61,6 +67,8 @@ RUN apk add --no-cache \
 ENV SAL_USE_VCLPLUGIN=svp
 
 RUN chmod 1777 /tmp \
+    && mkdir -p /.cache \
+    &&  chmod 1777 /.cache \
     && mkdir -p \
       /tmp/opencode \
       /.config/libreoffice/4 \
@@ -108,7 +116,8 @@ RUN mkdir -p /tmp/dotnet /tmp/nuget-packages && \
 
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium-browser
-RUN npm install -g playwright docx
+ENV NODE_PATH=/usr/local/lib/node_modules
+RUN npm install -g playwright docx pptxgenjs
 
 # Install uv and uvx from the official uv image
 COPY --from=uv /uv /uvx /usr/local/bin/
@@ -193,6 +202,8 @@ RUN opencode --version \
     #&& dotnet --list-sdks \
     && libreoffice --headless --version \
     && soffice --headless --version \
+    && pdftoppm -v \
+    && pdfinfo -v \
     && readpst -V
 
 EXPOSE 3000

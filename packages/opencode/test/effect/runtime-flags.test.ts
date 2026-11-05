@@ -311,6 +311,25 @@ describe("RuntimeFlags", () => {
     )
   }
 
+  for (const input of [
+    { name: "absent", value: undefined, expected: 20 * 1024 * 1024 },
+    { name: "valid positive integer", value: "52428800", expected: 52428800 },
+    { name: "empty", value: "", expected: 20 * 1024 * 1024 },
+    { name: "invalid string", value: "nope", expected: 20 * 1024 * 1024 },
+    { name: "zero", value: "0", expected: 20 * 1024 * 1024 },
+    { name: "negative", value: "-1", expected: 20 * 1024 * 1024 },
+    { name: "non-integer", value: "1.5", expected: 20 * 1024 * 1024 },
+    { name: "infinite", value: "Infinity", expected: 20 * 1024 * 1024 },
+  ]) {
+    it.effect(`parses maxFileUploadBytes from config: ${input.name}`, () =>
+      Effect.gen(function* () {
+        const flags = yield* readFlags.pipe(Effect.provide(fromConfig({ OPENCODE_MAX_FILE_UPLOAD_BYTES: input.value })))
+
+        expect(flags.maxFileUploadBytes).toBe(input.expected)
+      }),
+    )
+  }
+
   it.effect("layer ignores the active ConfigProvider for omitted test overrides", () =>
     Effect.gen(function* () {
       const flags = yield* readFlags.pipe(

@@ -6,12 +6,12 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath, RelativePath } from "@opencode-ai/core/schema"
 import { Effect, Layer, Option } from "effect"
+import { RuntimeFlags } from "@/effect/runtime-flags"
 import ignore from "ignore"
 import path from "path"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
-import { MAX_FILE_UPLOAD_BYTES } from "../groups/file"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Watcher } from "@opencode-ai/core/filesystem/watcher"
 
@@ -21,6 +21,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
     const locations = yield* LocationServiceMap
     const raw = yield* FSUtil.Service
     const events = yield* EventV2Bridge.Service
+    const flags = yield* RuntimeFlags.Service
 
     const filesystem = Effect.fnUntraced(function* <A, E, R>(effect: Effect.Effect<A, E, R>) {
       return yield* effect.pipe(
@@ -146,7 +147,7 @@ export const fileHandlers = HttpApiBuilder.group(InstanceHttpApi, "file", (handl
       query: { filename: string; mime?: string }
       payload: Uint8Array
     }) {
-      if (ctx.payload.byteLength > MAX_FILE_UPLOAD_BYTES) {
+      if (ctx.payload.byteLength > flags.maxFileUploadBytes) {
         return yield* new HttpApiError.BadRequest({})
       }
 

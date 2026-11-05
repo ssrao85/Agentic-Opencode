@@ -30,8 +30,6 @@ export const FileUploadResult = Schema.Struct({
   size: NonNegativeInt,
 }).annotate({ identifier: "FileUploadResult" })
 
-export const MAX_FILE_UPLOAD_BYTES = 20 * 1024 * 1024
-
 export const FindTextQuery = Schema.Struct({
   ...WorkspaceRoutingQueryFields,
   pattern: Schema.String,
