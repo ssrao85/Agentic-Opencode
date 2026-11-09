@@ -8,6 +8,7 @@ import {
   type DragEvent,
 } from "@thisbeyond/solid-dnd"
 import { ConstrainDragXAxis } from "@/utils/solid-dnd"
+import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip, TooltipKeybind } from "@opencode-ai/ui/tooltip"
 import { type LocalProject } from "@/context/layout"
@@ -30,6 +31,9 @@ export const SidebarContent = (props: {
   onOpenSettings: () => void
   helpLabel: Accessor<string>
   onOpenHelp: () => void
+  deployedAppsLabel: Accessor<string>
+  deployedAppsActive: Accessor<boolean>
+  onOpenDeployedApps: () => void
   renderPanel: () => JSX.Element
 }): JSX.Element => {
   const expanded = createMemo(() => !!props.mobile || props.opened())
@@ -90,6 +94,17 @@ export const SidebarContent = (props: {
           </DragDropProvider>
         </div>
         <div class="shrink-0 w-full pt-3 pb-6 flex flex-col items-center gap-2">
+          <button
+            type="button"
+            data-action="open-deployed-apps"
+            class="flex w-14 flex-col items-center gap-1 rounded-md px-1 py-1.5 text-text-base transition-colors hover:bg-surface-raised-base-hover focus-visible:bg-surface-raised-base-hover focus-visible:outline-none"
+            classList={{ "bg-surface-base-active text-text-strong": props.deployedAppsActive() }}
+            aria-current={props.deployedAppsActive() ? "page" : undefined}
+            onClick={props.onOpenDeployedApps}
+          >
+            <Icon name="window-cursor" class="text-icon-base" />
+            <span class="text-center text-11-medium leading-tight">{props.deployedAppsLabel()}</span>
+          </button>
           <TooltipKeybind placement={placement()} title={props.settingsLabel()} keybind={props.settingsKeybind() ?? ""}>
             <IconButton
               icon="settings-gear"

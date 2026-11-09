@@ -366,6 +366,7 @@ function HomeDesign() {
           unseenCount={unseenCount}
           openSettings={openSettings}
           openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+          openDeployedApps={() => navigate("/deployed-apps")}
           language={language}
         />
 
@@ -452,6 +453,7 @@ function HomeProjectColumn(props: {
   unseenCount: (server: ServerConnection.Any, project: LocalProject) => number
   openSettings: () => void
   openHelp: () => void
+  openDeployedApps: () => void
   language: ReturnType<typeof useLanguage>
 }) {
   const global = useGlobal()
@@ -505,6 +507,14 @@ function HomeProjectColumn(props: {
         </For>
       </Show>
       <div class="mt-4 flex min-w-0 flex-col gap-1">
+        <button
+          type="button"
+          class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}
+          onClick={props.openDeployedApps}
+        >
+          <IconV2 name="grid-plus" size="small" />
+          <span class={HOME_PROJECT_NAV_LABEL}>{props.language.t("deployedApps.title")}</span>
+        </button>
         <button
           type="button"
           class={`${HOME_PROJECT_NAV_ROW} text-v2-text-text-faint [&>[data-slot=icon-svg]]:text-v2-icon-icon-muted`}

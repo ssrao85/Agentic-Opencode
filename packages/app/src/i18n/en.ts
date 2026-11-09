@@ -1023,6 +1023,8 @@ export const dict = {
   "workspace.new": "New workspace",
   "workspace.type.local": "local",
   "workspace.type.sandbox": "sandbox",
+  "deployedApps.title": "Deployed Apps",
+  "command.deployedApps.open": "Open deployed apps",
   "workspace.storage.title": "Storage",
   "workspace.storage.diskUsage": "Disk Usage",
   "workspace.storage.remaining": "Available",

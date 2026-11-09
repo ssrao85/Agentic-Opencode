@@ -170,6 +170,10 @@ RUN git clone --depth 1 --branch ${LIBPST_TAG} https://github.com/pst-format/lib
 COPY container/apps /usr/local/bin/apps
 RUN chmod +x /usr/local/bin/apps
 
+# Deployed Apps dashboard, shown in the opencode sidebar. The entrypoint launches
+# it as the `dashboard` app so it is served at /apps/dashboard/.
+COPY container/dashboard /opt/opencode-dashboard
+
 # Deploy-app skill, available to every workspace. opencode scans
 # $HOME/.agents/skills/**/SKILL.md as global skills, and HOME=/ in this image.
 COPY container/skills /.agents/skills

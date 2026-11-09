@@ -43,4 +43,18 @@ case "$auto_restore:$1" in
     ;;
 esac
 
+# Start the Deployed Apps dashboard (served at /apps/dashboard/, linked from the
+# sidebar). It always starts, independent of OPENCODE_APPS_AUTO_RESTORE, so the
+# sidebar link works after every container restart. Set OPENCODE_APPS_DASHBOARD=false
+# to skip it.
+dashboard="$(printf '%s' "${OPENCODE_APPS_DASHBOARD:-true}" | tr '[:upper:]' '[:lower:]')"
+case "$dashboard:$1" in
+  0:* | false:* | no:* | off:*)
+    ;;
+  *:web | *:serve)
+    (cd /opt/opencode-dashboard && /usr/local/bin/apps run dashboard -- \
+      /opt/venv/bin/uvicorn main:app --host 127.0.0.1 --port {port} --root-path /apps/dashboard) || true
+    ;;
+esac
+
 exec /usr/local/bin/opencode "$@"

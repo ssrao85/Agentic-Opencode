@@ -1034,6 +1034,12 @@ export default function Layout(props: ParentProps) {
         onSelect: () => openServer(),
       },
       {
+        id: "deployedApps.open",
+        title: language.t("command.deployedApps.open"),
+        category: language.t("command.category.server"),
+        onSelect: () => navigate("/deployed-apps"),
+      },
+      {
         id: "settings.open",
         title: language.t("command.settings.open"),
         category: language.t("command.category.settings"),
@@ -2479,6 +2485,9 @@ export default function Layout(props: ParentProps) {
       onOpenSettings={openSettings}
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
+      deployedAppsLabel={() => language.t("deployedApps.title")}
+      deployedAppsActive={() => location.pathname === "/deployed-apps"}
+      onOpenDeployedApps={() => navigateWithSidebarReset("/deployed-apps")}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }

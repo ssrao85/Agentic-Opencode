@@ -66,3 +66,20 @@ back up after a pod restart with no manual step. You can also run `apps restore`
 by hand. Set `OPENCODE_APPS_AUTO_RESTORE=false` to disable this. The container
 starts `OPENCODE_SERVER_MODE=web` by default; set it to `serve` to start that
 mode instead.
+
+## Deployed Apps dashboard
+
+The image ships a small dashboard (`container/dashboard/`, installed at
+`/opt/opencode-dashboard`) that lists every registered app with its status,
+framework, port and deploy time, and can Open / Start / Stop / Remove apps and
+toggle **Auto-restart**. The web UI's **Deployed Apps** sidebar entry shows it.
+
+- The entrypoint launches it as the `dashboard` app (`/apps/dashboard/`) on every
+  container start in `web` or `serve` mode, independent of `OPENCODE_APPS_AUTO_RESTORE`.
+  Set `OPENCODE_APPS_DASHBOARD=false` to skip it.
+- It reads and writes the same registry as the `apps` CLI. It adds three fields:
+  `deployedAt` (first time the dashboard saw the app), `autoRestart`, and `stopped`
+  (set by **Stop** so the app is not relaunched).
+- **Auto-restart** is a watchdog inside the dashboard: every 10 seconds it relaunches
+  apps with auto-restart on that died without being stopped from the dashboard.
+- **Remove** stops the app and unregisters it; its files are kept.
