@@ -4,7 +4,7 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, OpenApi } from "effect/unstable/httpapi"
 import { ApiNotFoundError, ProjectNotFoundError } from "../errors"
 import { Authorization } from "../middleware/authorization"
-import { InstanceContextMiddleware } from "../middleware/instance-context"
+import { InstanceContextMiddleware, ProjectContextMiddleware } from "../middleware/instance-context"
 import { WorkspaceRoutingMiddleware, WorkspaceRoutingQuery } from "../middleware/workspace-routing"
 import { described } from "./metadata"
 
@@ -74,33 +74,39 @@ export const ProjectApi = HttpApi.make("project")
           query: WorkspaceRoutingQuery,
           success: described(Project.ManagedWorkspace, "Deleted managed workspace"),
           error: [HttpApiError.BadRequest, ApiNotFoundError],
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "project.deleteManaged",
-            summary: "Delete managed workspace",
-            description: "Delete a shared managed workspace, its directory, and its sessions.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "project.deleteManaged",
+              summary: "Delete managed workspace",
+              description: "Delete a shared managed workspace, its directory, and its sessions.",
+            }),
+          ),
         HttpApiEndpoint.get("current", `${root}/current`, {
           query: WorkspaceRoutingQuery,
           success: described(Project.Info, "Current project information"),
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "project.current",
-            summary: "Get current project",
-            description: "Retrieve the currently active project that OpenCode is working with.",
-          }),
-        ),
+        })
+          .middleware(ProjectContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "project.current",
+              summary: "Get current project",
+              description: "Retrieve the currently active project that OpenCode is working with.",
+            }),
+          ),
         HttpApiEndpoint.post("initGit", `${root}/git/init`, {
           query: WorkspaceRoutingQuery,
           success: described(Project.Info, "Project information after git initialization"),
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "project.initGit",
-            summary: "Initialize git repository",
-            description: "Create a git repository for the current project and return the refreshed project info.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "project.initGit",
+              summary: "Initialize git repository",
+              description: "Create a git repository for the current project and return the refreshed project info.",
+            }),
+          ),
         HttpApiEndpoint.patch("update", `${root}/:projectID`, {
           params: { projectID: ProjectV2.ID },
           query: WorkspaceRoutingQuery,
@@ -132,7 +138,6 @@ export const ProjectApi = HttpApi.make("project")
           description: "Experimental HttpApi project routes.",
         }),
       )
-      .middleware(InstanceContextMiddleware)
       .middleware(WorkspaceRoutingMiddleware)
       .middleware(Authorization),
   )

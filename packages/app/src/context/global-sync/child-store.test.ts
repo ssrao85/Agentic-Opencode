@@ -153,12 +153,7 @@ describe("createChildStoreManager", () => {
       expect(store.status).toBe("loading")
       expect(store.limit).toBe(5)
       expect(bootstraps).toEqual(["/project"])
-      expect(querySingles.slice(offset, offset + 4).map((query) => query().enabled)).toEqual([
-        true,
-        false,
-        true,
-        true,
-      ])
+      expect(querySingles.slice(offset, offset + 4).map((query) => query().enabled)).toEqual([true, false, true, true])
     } finally {
       dispose()
     }
@@ -197,6 +192,51 @@ describe("createChildStoreManager", () => {
         false,
         false,
       ])
+    } finally {
+      dispose()
+    }
+  })
+
+  test("keeps passive workspace stores cold and bootstraps only the selected workspace", () => {
+    const bootstraps: string[] = []
+    const offset = querySingles.length
+    let manager: ReturnType<typeof createChildStoreManager> | undefined
+    const dispose = createOwner((owner) => {
+      manager = createChildStoreManager({
+        owner,
+        scope: ServerScope.local,
+        persist,
+        isBooting: () => false,
+        isLoadingSessions: () => false,
+        onBootstrap: (directory) => bootstraps.push(directory),
+        onMcp() {},
+        onDispose() {},
+        translate: (key) => key,
+        queryOptions: queryOptionsApi,
+        global: { provider },
+      })
+    })
+
+    try {
+      if (!manager) throw new Error("manager required")
+      Array.from({ length: 8 }, (_, index) => `/workspace-${index}`).forEach((directory) => {
+        manager!.child(directory, { bootstrap: false })
+        manager!.peek(directory, { bootstrap: false })
+      })
+      expect(bootstraps).toEqual([])
+      expect(querySingles.slice(offset).every((query) => query().enabled === false)).toBe(true)
+
+      const [store] = manager.child("/workspace-3", { bootstrap: true })
+      expect(bootstraps).toEqual(["/workspace-3"])
+      expect(
+        querySingles
+          .slice(offset)
+          .filter((query) => query().enabled)
+          .map((query) => query().queryKey?.[0]),
+      ).toEqual(["/workspace-3", "/workspace-3", "/workspace-3"])
+      manager.child("/workspace-3", { bootstrap: false })
+      expect(store.status).toBe("loading")
+      expect(bootstraps).toEqual(["/workspace-3"])
     } finally {
       dispose()
     }

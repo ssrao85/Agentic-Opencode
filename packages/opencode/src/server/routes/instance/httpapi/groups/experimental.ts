@@ -8,7 +8,7 @@ import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiError, HttpApiGroup, HttpApiSchema, OpenApi } from "effect/unstable/httpapi"
 import { Authorization } from "../middleware/authorization"
-import { InstanceContextMiddleware } from "../middleware/instance-context"
+import { InstanceContextMiddleware, ProjectContextMiddleware } from "../middleware/instance-context"
 import {
   WorkspaceRoutingMiddleware,
   WorkspaceRoutingQuery,
@@ -104,108 +104,127 @@ export const ExperimentalApi = HttpApi.make("experimental")
           query: WorkspaceRoutingQuery,
           success: described(ConsoleStateResponse, "Active Console provider metadata"),
           error: HttpApiError.InternalServerError,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "experimental.console.get",
-            summary: "Get active Console provider metadata",
-            description: "Get the active Console org name and the set of provider IDs managed by that Console org.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "experimental.console.get",
+              summary: "Get active Console provider metadata",
+              description: "Get the active Console org name and the set of provider IDs managed by that Console org.",
+            }),
+          ),
         HttpApiEndpoint.get("consoleOrgs", ExperimentalPaths.consoleOrgs, {
           query: WorkspaceRoutingQuery,
           success: described(ConsoleOrgList, "Switchable Console orgs"),
           error: HttpApiError.InternalServerError,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "experimental.console.listOrgs",
-            summary: "List switchable Console orgs",
-            description: "Get the available Console orgs across logged-in accounts, including the current active org.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "experimental.console.listOrgs",
+              summary: "List switchable Console orgs",
+              description:
+                "Get the available Console orgs across logged-in accounts, including the current active org.",
+            }),
+          ),
         HttpApiEndpoint.post("consoleSwitch", ExperimentalPaths.consoleSwitch, {
           query: WorkspaceRoutingQuery,
           payload: ConsoleSwitchPayload,
           success: described(Schema.Boolean, "Switch success"),
           error: HttpApiError.BadRequest,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "experimental.console.switchOrg",
-            summary: "Switch active Console org",
-            description: "Persist a new active Console account/org selection for the current local OpenCode state.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "experimental.console.switchOrg",
+              summary: "Switch active Console org",
+              description: "Persist a new active Console account/org selection for the current local OpenCode state.",
+            }),
+          ),
         HttpApiEndpoint.get("tool", ExperimentalPaths.tool, {
           query: ToolListQuery,
           success: described(ToolList, "Tools"),
           error: HttpApiError.BadRequest,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "tool.list",
-            summary: "List tools",
-            description:
-              "Get a list of available tools with their JSON schema parameters for a specific provider and model combination.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "tool.list",
+              summary: "List tools",
+              description:
+                "Get a list of available tools with their JSON schema parameters for a specific provider and model combination.",
+            }),
+          ),
         HttpApiEndpoint.get("toolIDs", ExperimentalPaths.toolIDs, {
           query: WorkspaceRoutingQuery,
           success: described(ToolIDs, "Tool IDs"),
           error: HttpApiError.BadRequest,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "tool.ids",
-            summary: "List tool IDs",
-            description:
-              "Get a list of all available tool IDs, including both built-in tools and dynamically registered tools.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "tool.ids",
+              summary: "List tool IDs",
+              description:
+                "Get a list of all available tool IDs, including both built-in tools and dynamically registered tools.",
+            }),
+          ),
         HttpApiEndpoint.get("worktree", ExperimentalPaths.worktree, {
           query: WorkspaceRoutingQuery,
           success: described(WorktreeList, "List of worktree directories"),
           error: WorktreeApiError,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "worktree.list",
-            summary: "List worktrees",
-            description: "List all sandbox worktrees for the current project.",
-          }),
-        ),
+        })
+          .middleware(ProjectContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "worktree.list",
+              summary: "List worktrees",
+              description: "List all sandbox worktrees for the current project.",
+            }),
+          ),
         HttpApiEndpoint.post("worktreeCreate", ExperimentalPaths.worktree, {
           disableCodecs: true,
           query: WorkspaceRoutingQuery,
           payload: [HttpApiSchema.NoContent, Worktree.CreateInput],
           success: described(Worktree.Info, "Worktree created"),
           error: WorktreeApiError,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "worktree.create",
-            summary: "Create worktree",
-            description: "Create a new git worktree for the current project and run any configured startup scripts.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "worktree.create",
+              summary: "Create worktree",
+              description: "Create a new git worktree for the current project and run any configured startup scripts.",
+            }),
+          ),
         HttpApiEndpoint.delete("worktreeRemove", ExperimentalPaths.worktree, {
           query: WorkspaceRoutingQuery,
           payload: Worktree.RemoveInput,
           success: described(Schema.Boolean, "Worktree removed"),
           error: WorktreeApiError,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "worktree.remove",
-            summary: "Remove worktree",
-            description: "Remove a git worktree and delete its branch.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "worktree.remove",
+              summary: "Remove worktree",
+              description: "Remove a git worktree and delete its branch.",
+            }),
+          ),
         HttpApiEndpoint.post("worktreeReset", ExperimentalPaths.worktreeReset, {
           query: WorkspaceRoutingQuery,
           payload: Worktree.ResetInput,
           success: described(Schema.Boolean, "Worktree reset"),
           error: WorktreeApiError,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "worktree.reset",
-            summary: "Reset worktree",
-            description: "Reset a worktree branch to the primary default branch.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "worktree.reset",
+              summary: "Reset worktree",
+              description: "Reset a worktree branch to the primary default branch.",
+            }),
+          ),
         HttpApiEndpoint.get("session", ExperimentalPaths.session, {
           query: SessionListQuery,
           success: described(Schema.Array(Session.GlobalInfo), "List of sessions"),
@@ -222,24 +241,28 @@ export const ExperimentalApi = HttpApi.make("experimental")
           query: WorkspaceRoutingQuery,
           success: described(Schema.Boolean, "Backgrounded subagents"),
           error: HttpApiError.BadRequest,
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "experimental.session.background",
-            summary: "Background subagents",
-            description:
-              "Detach any synchronous subagents currently blocking the session and continue them in the background.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "experimental.session.background",
+              summary: "Background subagents",
+              description:
+                "Detach any synchronous subagents currently blocking the session and continue them in the background.",
+            }),
+          ),
         HttpApiEndpoint.get("resource", ExperimentalPaths.resource, {
           query: WorkspaceRoutingQuery,
           success: described(Schema.Record(Schema.String, MCP.Resource), "MCP resources"),
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "experimental.resource.list",
-            summary: "Get MCP resources",
-            description: "Get all available MCP resources from connected servers. Optionally filter by name.",
-          }),
-        ),
+        })
+          .middleware(InstanceContextMiddleware)
+          .annotateMerge(
+            OpenApi.annotations({
+              identifier: "experimental.resource.list",
+              summary: "Get MCP resources",
+              description: "Get all available MCP resources from connected servers. Optionally filter by name.",
+            }),
+          ),
       )
       .annotateMerge(
         OpenApi.annotations({
@@ -247,7 +270,6 @@ export const ExperimentalApi = HttpApi.make("experimental")
           description: "Experimental HttpApi read-only routes.",
         }),
       )
-      .middleware(InstanceContextMiddleware)
       .middleware(WorkspaceRoutingMiddleware)
       .middleware(Authorization),
   )

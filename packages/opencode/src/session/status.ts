@@ -73,6 +73,7 @@ export const layer = Layer.effect(
     })
 
     const list = Effect.fn("SessionStatus.list")(function* () {
+      if (!(yield* InstanceState.has(state))) return new Map<SessionID, Info>()
       return new Map(yield* InstanceState.get(state))
     })
 

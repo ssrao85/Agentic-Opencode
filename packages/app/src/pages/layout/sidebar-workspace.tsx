@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from "@solidjs/router"
-import { createEffect, createMemo, For, Show, type Accessor, type JSX } from "solid-js"
+import { createEffect, createMemo, For, on, Show, type Accessor, type JSX } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createSortable } from "@thisbeyond/solid-dnd"
 import { createMediaQuery } from "@solid-primitives/media"
@@ -318,7 +318,6 @@ export const SortableWorkspace = (props: {
     return props.ctx.workspaceName(props.directory, props.project.id, branch) ?? name
   })
   const open = createMemo(() => props.ctx.workspaceExpanded(props.directory, local()))
-  const boot = createMemo(() => open() || active())
   const count = createMemo(() => sessions()?.length ?? 0)
   const hasMore = createMemo(() => workspaceStore.sessionTotal > count())
   const fetching = useIsFetching(() => queryOptions().sessions(pathKey(props.directory)))
@@ -355,10 +354,15 @@ export const SortableWorkspace = (props: {
     if (props.ctx.editorOpen(`workspace:${props.directory}`)) props.ctx.closeEditor()
   }
 
-  createEffect(() => {
-    if (!boot()) return
-    serverSync().child(props.directory, { bootstrap: true })
-  })
+  createEffect(
+    on([open, active], ([expanded, selected]) => {
+      if (selected) {
+        serverSync().child(props.directory, { bootstrap: true })
+        return
+      }
+      if (expanded) void serverSync().project.loadSessions(props.directory)
+    }),
+  )
 
   return (
     <div
@@ -450,9 +454,15 @@ export const LocalWorkspace = (props: {
   const queryOptions = useQueryOptions()
   const language = useLanguage()
   const workspace = createMemo(() => {
-    const [store, setStore] = serverSync().child(props.project.worktree)
+    const [store, setStore] = serverSync().child(props.project.worktree, { bootstrap: false })
     return { store, setStore }
   })
+  createEffect(
+    on(
+      () => props.project.worktree,
+      (directory) => void serverSync().project.loadSessions(directory),
+    ),
+  )
   const slug = createMemo(() => base64Encode(props.project.worktree))
   const sessions = createMemo(() => sortedRootSessions(workspace().store, props.sortNow()))
   const count = createMemo(() => sessions()?.length ?? 0)

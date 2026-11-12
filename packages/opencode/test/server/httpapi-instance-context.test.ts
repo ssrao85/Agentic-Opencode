@@ -19,6 +19,8 @@ import { disposeMiddleware, markInstanceForDisposal } from "../../src/server/rou
 import {
   InstanceContextMiddleware,
   instanceContextLayer,
+  ProjectContextMiddleware,
+  projectContextLayer,
 } from "../../src/server/routes/instance/httpapi/middleware/instance-context"
 import {
   WorkspaceRoutingMiddleware,
@@ -59,6 +61,7 @@ const it = testEffect(
 
 const instanceContextTestLayer = Layer.mergeAll(
   instanceContextLayer,
+  projectContextLayer,
   workspaceRoutingLayer.pipe(Layer.provide(Socket.layerWebSocketConstructorGlobal)),
 )
 
@@ -117,12 +120,18 @@ const ProbeApi = HttpApi.make("instance-context-probe").add(
       }),
     )
     .middleware(InstanceContextMiddleware)
+    .add(
+      HttpApiEndpoint.get("metadata", "/metadata", { query: WorkspaceRoutingQuery, success: ProbeResult }).middleware(
+        ProjectContextMiddleware,
+      ),
+    )
     .middleware(WorkspaceRoutingMiddleware),
 )
 
 const probeHandlers = HttpApiBuilder.group(ProbeApi, "probe", (handlers) =>
   handlers
     .handle("get", () => probeInstanceContext)
+    .handle("metadata", () => probeInstanceContext)
     .handle("session", () => probeInstanceContext)
     .handle(
       "dispose",
@@ -154,6 +163,33 @@ const serveDisposeProbe = () =>
   )
 
 describe("HttpApi instance context middleware", () => {
+  it.live("provides project metadata context from workspace routing", () =>
+    Effect.gen(function* () {
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const workspaceDir = path.join(dir, ".workspace-metadata")
+      const workspace = yield* createLocalWorkspace({
+        projectID: project.project.id,
+        type: "project-context-routing-output",
+        directory: workspaceDir,
+      })
+      yield* serveProbe()
+
+      const response = yield* HttpClientRequest.get(`/metadata?workspace=${workspace.id}`).pipe(
+        HttpClientRequest.setHeader("x-opencode-directory", dir),
+        HttpClient.execute,
+      )
+
+      expect(response.status).toBe(200)
+      expect(yield* response.json).toEqual({
+        directory: workspaceDir,
+        worktree: dir,
+        projectID: project.project.id,
+        workspaceID: workspace.id,
+      })
+    }),
+  )
+
   it.live("provides instance context from the routed directory", () =>
     Effect.gen(function* () {
       const dir = yield* tmpdirScoped({ git: true })
