@@ -43,9 +43,17 @@ The Dockerfile uses `dist/opencode-linux-x64-baseline-musl` for x86_64 images an
 ```bash
 docker build --platform linux/amd64 \
   -f packages/opencode/Dockerfile \
+  --build-arg REVISION="$(git rev-parse --short HEAD)" \
   -t opencode-local:latest \
+  -t "opencode-local:$(git rev-parse --short HEAD)" \
   packages/opencode
 ```
+
+- Tag every build with its commit (the second `-t`) and deploy that tag, never
+  `latest`. A commit tag is immutable, so you always know what is running and can
+  roll back to an exact build. `REVISION` is also stored as the
+  `org.opencontainers.image.revision` label
+  (`docker inspect -f '{{ index .Config.Labels "org.opencontainers.image.revision" }}' <image>`).
 
 - **Use `--platform linux/amd64`**, the architecture of the OpenShift nodes. On
   Apple Silicon this runs under emulation and takes 30–60 minutes the first time;
@@ -231,7 +239,18 @@ and run step 6 again with the new tag.
 
 6. Roll back if needed: `oc rollout undo deployment/<opencode-deployment>`.
 
-Run a single replica: deployed apps are processes inside the opencode pod.
+Run a single replica with `strategy: Recreate`: deployed apps are processes inside
+the opencode pod and the registry on `/all-workspaces` is per pod. A rolling update
+would briefly run two pods against the same registry (and a ReadWriteOnce volume
+can block the new pod).
+
+```bash
+oc patch deployment/<opencode-deployment> -p '{"spec":{"replicas":1,"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+```
+
+If you used the no-image dashboard copy on the volume before this image, remove
+it after the rollout (and any `command`/`args` override added for it):
+`oc exec deploy/<opencode-deployment> -- rm -rf /all-workspaces/.opencode/dashboard /all-workspaces/deployed-apps-dashboard`.
 
 ## Troubleshooting
 
@@ -243,5 +262,5 @@ Run a single replica: deployed apps are processes inside the opencode pod.
 | arm64 build fails on `pymupdf` / `libclang` | Build `--platform linux/amd64` (step 4). |
 | Logs show `Required configuration file does not exist` | `OPENCODE_CONFIG_ONLY` points to a missing or empty file (step 5). |
 | Chat reply stays empty | Check `docker logs opencode 2>&1 \| grep ERROR`; usually a provider key or quota problem (step 7). |
-| `EACCES: permission denied, mkdir '/.npm'` warnings | Plugin dependency installs need a writable npm cache; add `-e NPM_CONFIG_CACHE=/tmp/.npm`. |
+| `EACCES: permission denied, mkdir '/.npm'` warnings | Older images only: the image now sets `NPM_CONFIG_CACHE=/tmp/.npm`. For an older image, add `-e NPM_CONFIG_CACHE=/tmp/.npm`. |
 | Deployed Apps page shows `Unknown app: dashboard` | The dashboard is not running: `docker exec opencode apps list`, then `docker restart opencode`. |

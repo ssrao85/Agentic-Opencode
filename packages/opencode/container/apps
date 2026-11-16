@@ -126,7 +126,7 @@ function add(name, p) {
   console.log(`registered ${name} -> 127.0.0.1:${prt}   open: ${publicUrl(name)}`)
 }
 
-async function run(name, wantedPort, cmd, cwd) {
+async function run(name, wantedPort, cmd, cwd, restoring = false) {
   if (!validName(name)) die(`invalid name: ${name}`)
   if (!cmd.length) die("missing command — put it after `--`")
   // Record the working dir so `apps restore` relaunches from the same place
@@ -152,7 +152,19 @@ async function run(name, wantedPort, cmd, cwd) {
   })
   child.unref()
   const reg = readRegistry()
-  reg[name] = { port: prt, pid: child.pid, cmd: finalCmd, cwd: workdir, log: logFile }
+  // Keep fields other tools store on the entry (e.g. the dashboard's autoRestart).
+  // A deploy is a fresh start, so it clears `stopped` and stamps deployedAt; a
+  // restore relaunches the same deployment and keeps its original deployedAt.
+  const { stopped, ...kept } = reg[name] || {}
+  reg[name] = {
+    ...kept,
+    port: prt,
+    pid: child.pid,
+    cmd: finalCmd,
+    cwd: workdir,
+    log: logFile,
+    deployedAt: restoring && kept.deployedAt ? kept.deployedAt : Date.now(),
+  }
   writeRegistry(reg)
   console.log(`launched ${name} (pid ${child.pid}) -> 127.0.0.1:${prt}`)
   console.log(`  open: ${publicUrl(name)}`)
@@ -271,12 +283,26 @@ async function restore() {
   let n = 0
   for (const name of Object.keys(reg)) {
     const e = reg[name]
-    if (Array.isArray(e.cmd) && e.cmd.length && !alive(e.pid)) {
-      await run(name, e.port, e.cmd, e.cwd)
+    // An app stopped on purpose (dashboard Stop) stays stopped across restarts.
+    if (Array.isArray(e.cmd) && e.cmd.length && !e.stopped && !alive(e.pid)) {
+      await run(name, e.port, e.cmd, e.cwd, true)
       n++
     }
   }
   console.log(`restored ${n} app(s)`)
+}
+
+// Run once at container start. The registry outlives the container, but its pids
+// do not: a fresh container has a new pid namespace, so every recorded pid is stale
+// and may now belong to an unrelated process. Forgetting them keeps `restore`,
+// `kill` and the dashboard from mistaking that process for an app or signalling it.
+function resetPids() {
+  const reg = readRegistry()
+  const names = Object.keys(reg).filter((n) => reg[n] && reg[n].pid)
+  if (!names.length) return
+  for (const n of names) delete reg[n].pid
+  writeRegistry(reg)
+  console.log(`cleared stale pids for ${names.length} app(s)`)
 }
 
 async function main() {
@@ -310,6 +336,9 @@ async function main() {
     case "restore":
       await restore()
       break
+    case "reset-pids":
+      resetPids()
+      break
     default:
       console.log(`opencode apps — expose loopback apps under /apps/<name>/  (registry: ${REGISTRY})
 
@@ -326,6 +355,8 @@ usage:
   apps kill <name>                     stop the app process and unregister
   apps rm <name>                       unregister without killing
   apps restore                         relaunch registered apps that aren't running
+                                       (skips apps stopped from the dashboard)
+  apps reset-pids                      forget recorded pids; run only at container start
 
 examples:
   cd /all-workspaces/<id> && apps deploy division        # FastAPI division.py -> /apps/division/

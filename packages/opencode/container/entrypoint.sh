@@ -34,6 +34,15 @@ if [ -n "$global_skills_source" ] || [ -n "$global_skills_destination" ]; then
   cp -R "$global_skills_source"/. "$global_skills_destination"/.
 fi
 
+# Forget pids recorded by the previous container before anything reads them; see
+# `apps reset-pids`. Only server modes own the registry, so one-off CLI runs that
+# share the volume never touch a live server's entries.
+case "${1:-}" in
+  web | serve)
+    /usr/local/bin/apps reset-pids || true
+    ;;
+esac
+
 auto_restore="$(printf '%s' "${OPENCODE_APPS_AUTO_RESTORE:-true}" | tr '[:upper:]' '[:lower:]')"
 case "$auto_restore:$1" in
   0:* | false:* | no:* | off:*)

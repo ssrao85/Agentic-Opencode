@@ -63,7 +63,11 @@ command + working dir) persists on the `/all-workspaces` volume, so the
 container entrypoint (`container/entrypoint.sh`) runs **`apps restore`**
 automatically when opencode starts in `web` or `serve` mode — deployed apps come
 back up after a pod restart with no manual step. You can also run `apps restore`
-by hand. Set `OPENCODE_APPS_AUTO_RESTORE=false` to disable this. The container
+by hand. Apps stopped from the dashboard stay stopped.
+
+Before restoring, the entrypoint runs `apps reset-pids`. Recorded pids belong to
+the previous container and may now be reused by an unrelated process, so they are
+cleared rather than trusted. Set `OPENCODE_APPS_AUTO_RESTORE=false` to disable this. The container
 starts `OPENCODE_SERVER_MODE=web` by default; set it to `serve` to start that
 mode instead.
 
@@ -80,8 +84,13 @@ toggle **Auto-restart**. The web UI's **Deployed Apps** sidebar entry shows it.
   container start in `web` or `serve` mode, independent of `OPENCODE_APPS_AUTO_RESTORE`.
   Set `OPENCODE_APPS_DASHBOARD=false` to skip it.
 - It reads and writes the same registry as the `apps` CLI. It adds three fields:
-  `deployedAt` (first time the dashboard saw the app), `autoRestart`, and `stopped`
-  (set by **Stop** so the app is not relaunched).
+  `deployedAt`, `autoRestart`, and `stopped` (set by **Stop** so the app is not
+  relaunched). `apps run`/`apps deploy` keep these fields, stamp `deployedAt` with
+  the deploy time and clear `stopped`; `apps restore` keeps the original `deployedAt`.
+  Apps registered with `apps add` get `deployedAt` when the dashboard first sees them.
 - **Auto-restart** is a watchdog inside the dashboard: every 10 seconds it relaunches
   apps with auto-restart on that died without being stopped from the dashboard.
 - **Remove** stops the app and unregisters it; its files are kept.
+- The dashboard is code, so it ships in the image (read-only, versioned with each
+  image); only its data (the registry and logs) lives on `/all-workspaces`. Don't
+  place code under `/all-workspaces` in the image: the volume mount hides it.

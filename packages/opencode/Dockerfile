@@ -183,6 +183,9 @@ COPY container/skills /.agents/skills
 COPY container/entrypoint.sh /usr/local/bin/opencode-entrypoint
 RUN chmod +x /usr/local/bin/opencode-entrypoint
 ENV OPENCODE_APPS_AUTO_RESTORE=true
+# HOME=/ is not writable for OpenShift's random UID; give npm (plugin installs at
+# runtime) a cache it can write. Set late so it does not invalidate the cached layers above.
+ENV NPM_CONFIG_CACHE=/tmp/.npm
 ENV OPENCODE_SERVER_MODE=web
 
 FROM base AS build-amd64
@@ -193,6 +196,11 @@ COPY dist/opencode-linux-arm64-musl/bin/opencode /usr/local/bin/opencode
 
 ARG TARGETARCH
 FROM build-${TARGETARCH}
+
+# Traceability: `docker build --build-arg REVISION=$(git rev-parse --short HEAD)`.
+ARG REVISION=unknown
+LABEL org.opencontainers.image.title="opencode" \
+      org.opencontainers.image.revision="${REVISION}"
 
 RUN opencode --version \
     && sqlite3 --version \
