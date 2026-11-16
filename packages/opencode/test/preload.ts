@@ -49,6 +49,11 @@ process.env["OPENCODE_TEST_HOME"] = testHome
 const testManagedConfigDir = path.join(dir, "managed")
 process.env["OPENCODE_TEST_MANAGED_CONFIG_DIR"] = testManagedConfigDir
 
+// Tests must explicitly supply the required config instead of reading the host's /etc/opencode file.
+const testConfig = path.join(dir, "opencode.jsonc")
+await fs.writeFile(testConfig, "{}")
+process.env["OPENCODE_CONFIG_ONLY"] = testConfig
+
 // Write the cache version file to prevent global/index.ts from clearing the cache
 const cacheDir = path.join(dir, "cache", "opencode")
 await fs.mkdir(cacheDir, { recursive: true })

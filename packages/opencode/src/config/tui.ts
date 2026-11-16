@@ -5,7 +5,6 @@ import { mergeDeep, unique } from "remeda"
 import { Cause, Context, Effect, Fiber, Layer } from "effect"
 import { ConfigParse } from "@/config/parse"
 import * as ConfigPaths from "@/config/paths"
-import { migrateTuiConfig } from "./tui-migrate"
 import { resolveHostAttentionSoundPaths } from "./tui-host-attention"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { isRecord } from "@opencode-ai/tui/util/record"
@@ -169,7 +168,6 @@ const loadState = Effect.fn("TuiConfig.loadState")(function* (ctx: { directory: 
   // Every config dir we may read from: global config dir, any `.opencode`
   // folders between cwd and home, and OPENCODE_CONFIG_DIR.
   const directories = yield* ConfigPaths.directories(ctx.directory)
-  yield* Effect.promise(() => migrateTuiConfig({ directories, cwd: ctx.directory }))
 
   const projectFiles = Flag.OPENCODE_DISABLE_PROJECT_CONFIG ? [] : yield* ConfigPaths.files("tui", ctx.directory)
 

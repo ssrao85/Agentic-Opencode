@@ -1,20 +1,24 @@
+import path from "path"
 import { expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { Config } from "@/config/config"
-import { Agent as AgentSvc } from "../../src/agent/agent"
+import { Agent } from "../../src/agent/agent"
 import { testEffect } from "../lib/effect"
+import { TestInstance } from "../fixture/fixture"
 
-const it = testEffect(Layer.mergeAll(Config.defaultLayer, AgentSvc.defaultLayer, CrossSpawnSpawner.defaultLayer))
+const it = testEffect(Layer.mergeAll(Config.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
 it.instance(
-  "agent color parsed from project config",
+  "agent color parsed from the explicitly selected config",
   () =>
-    Effect.gen(function* () {
-      const cfg = yield* Config.use.get()
-      expect(cfg.agent?.["build"]?.color).toBe("#FFA500")
-      expect(cfg.agent?.["plan"]?.color).toBe("primary")
-    }),
+    withSelectedConfig(
+      Effect.gen(function* () {
+        const cfg = yield* Config.use.get()
+        expect(cfg.agent?.["build"]?.color).toBe("#FFA500")
+        expect(cfg.agent?.["plan"]?.color).toBe("primary")
+      }),
+    ),
   {
     git: true,
     config: {
@@ -29,12 +33,14 @@ it.instance(
 it.instance(
   "Agent.get includes color from config",
   () =>
-    Effect.gen(function* () {
-      const plan = yield* AgentSvc.use.get("plan")
-      expect(plan?.color).toBe("#A855F7")
-      const build = yield* AgentSvc.use.get("build")
-      expect(build?.color).toBe("accent")
-    }),
+    withSelectedConfig(
+      Effect.gen(function* () {
+        const plan = yield* Agent.use.get("plan")
+        expect(plan?.color).toBe("#A855F7")
+        const build = yield* Agent.use.get("build")
+        expect(build?.color).toBe("accent")
+      }),
+    ),
   {
     git: true,
     config: {
@@ -45,3 +51,22 @@ it.instance(
     },
   },
 )
+
+function withSelectedConfig<A, E, R>(effect: Effect.Effect<A, E, R>) {
+  return Effect.gen(function* () {
+    const instance = yield* TestInstance
+    return yield* Effect.acquireUseRelease(
+      Effect.sync(() => {
+        const original = process.env.OPENCODE_CONFIG_ONLY
+        process.env.OPENCODE_CONFIG_ONLY = path.join(instance.directory, "opencode.json")
+        return original
+      }),
+      () => effect,
+      (original) =>
+        Effect.sync(() => {
+          if (original === undefined) delete process.env.OPENCODE_CONFIG_ONLY
+          if (original !== undefined) process.env.OPENCODE_CONFIG_ONLY = original
+        }),
+    )
+  })
+}
