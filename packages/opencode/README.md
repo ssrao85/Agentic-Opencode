@@ -16,6 +16,8 @@ This project was created using `bun init` in bun v1.2.12. [Bun](https://bun.sh) 
 
 ## Container configuration
 
+To build, run and deploy the Docker image, see [DOCKER.md](./DOCKER.md).
+
 This customized build loads exactly one required OpenCode configuration file.
 The default is `/etc/opencode/opencode.jsonc`. To select another file, set:
 

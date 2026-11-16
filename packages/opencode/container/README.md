@@ -69,6 +69,8 @@ mode instead.
 
 ## Deployed Apps dashboard
 
+Building and running the image: [DOCKER.md](../DOCKER.md).
+
 The image ships a small dashboard (`container/dashboard/`, installed at
 `/opt/opencode-dashboard`) that lists every registered app with its status,
 framework, port and deploy time, and can Open / Start / Stop / Remove apps and
