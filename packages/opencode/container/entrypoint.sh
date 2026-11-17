@@ -40,6 +40,11 @@ fi
 case "${1:-}" in
   web | serve)
     /usr/local/bin/apps reset-pids || true
+    # Older images ran a Python dashboard as the `dashboard` app; the Deployed Apps
+    # page is now built into opencode, so drop that entry once.
+    if grep -q '"/opt/opencode-dashboard"' "${OPENCODE_APPS_REGISTRY:-/all-workspaces/apps.json}" 2>/dev/null; then
+      /usr/local/bin/apps rm dashboard || true
+    fi
     ;;
 esac
 
@@ -52,17 +57,11 @@ case "$auto_restore:$1" in
     ;;
 esac
 
-# Start the Deployed Apps dashboard (served at /apps/dashboard/, linked from the
-# sidebar). It always starts, independent of OPENCODE_APPS_AUTO_RESTORE, so the
-# sidebar link works after every container restart. Set OPENCODE_APPS_DASHBOARD=false
-# to skip it.
-dashboard="$(printf '%s' "${OPENCODE_APPS_DASHBOARD:-true}" | tr '[:upper:]' '[:lower:]')"
-case "$dashboard:$1" in
-  0:* | false:* | no:* | off:*)
-    ;;
-  *:web | *:serve)
-    (cd /opt/opencode-dashboard && /usr/local/bin/apps run dashboard -- \
-      /opt/venv/bin/uvicorn main:app --host 127.0.0.1 --port {port} --root-path /apps/dashboard) || true
+# Watchdog for apps with auto-restart on (toggled on the Deployed Apps page). It runs
+# for the life of the container, independent of OPENCODE_APPS_AUTO_RESTORE.
+case "${1:-}" in
+  web | serve)
+    /usr/local/bin/apps supervise &
     ;;
 esac
 

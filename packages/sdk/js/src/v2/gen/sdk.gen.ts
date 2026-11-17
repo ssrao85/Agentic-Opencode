@@ -24,6 +24,16 @@ import type {
   ConfigProvidersResponses,
   ConfigUpdateErrors,
   ConfigUpdateResponses,
+  DeployedAppListErrors,
+  DeployedAppListResponses,
+  DeployedAppRemoveErrors,
+  DeployedAppRemoveResponses,
+  DeployedAppStartErrors,
+  DeployedAppStartResponses,
+  DeployedAppStopErrors,
+  DeployedAppStopResponses,
+  DeployedAppUpdateErrors,
+  DeployedAppUpdateResponses,
   EventSubscribeResponses,
   EventTuiCommandExecute,
   EventTuiPromptAppend,
@@ -1213,6 +1223,112 @@ export class Experimental extends HeyApiClient {
   private _workspace?: Workspace
   get workspace(): Workspace {
     return (this._workspace ??= new Workspace({ client: this.client }))
+  }
+}
+
+export class DeployedApp extends HeyApiClient {
+  /**
+   * List deployed apps
+   *
+   * List web apps registered under /apps/<name>/ with their live status.
+   */
+  public list<ThrowOnError extends boolean = false>(options?: Options<never, ThrowOnError>) {
+    return (options?.client ?? this.client).get<DeployedAppListResponses, DeployedAppListErrors, ThrowOnError>({
+      url: "/deployed-app",
+      ...options,
+    })
+  }
+
+  /**
+   * Start deployed app
+   *
+   * Relaunch a stopped app with its recorded command, working directory and port.
+   */
+  public start<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "name" }] }])
+    return (options?.client ?? this.client).post<DeployedAppStartResponses, DeployedAppStartErrors, ThrowOnError>({
+      url: "/deployed-app/{name}/start",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Stop deployed app
+   *
+   * Stop a running app and keep it stopped across restarts until it is started again.
+   */
+  public stop<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "name" }] }])
+    return (options?.client ?? this.client).post<DeployedAppStopResponses, DeployedAppStopErrors, ThrowOnError>({
+      url: "/deployed-app/{name}/stop",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Remove deployed app
+   *
+   * Stop the app and remove it from the registry. Its source files are left untouched.
+   */
+  public remove<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "path", key: "name" }] }])
+    return (options?.client ?? this.client).delete<DeployedAppRemoveResponses, DeployedAppRemoveErrors, ThrowOnError>({
+      url: "/deployed-app/{name}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Update deployed app
+   *
+   * Change per-app settings such as auto-restart.
+   */
+  public update<ThrowOnError extends boolean = false>(
+    parameters: {
+      name: string
+      autoRestart?: boolean
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "name" },
+            { in: "body", key: "autoRestart" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).patch<DeployedAppUpdateResponses, DeployedAppUpdateErrors, ThrowOnError>({
+      url: "/deployed-app/{name}",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
   }
 }
 
@@ -6849,6 +6965,11 @@ export class OpencodeClient extends HeyApiClient {
   private _experimental?: Experimental
   get experimental(): Experimental {
     return (this._experimental ??= new Experimental({ client: this.client }))
+  }
+
+  private _deployedApp?: DeployedApp
+  get deployedApp(): DeployedApp {
+    return (this._deployedApp ??= new DeployedApp({ client: this.client }))
   }
 
   private _global?: Global

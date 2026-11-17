@@ -150,9 +150,14 @@ async function run(name, wantedPort, cmd, cwd, restoring = false) {
     stdio: ["ignore", out, out],
     env: { ...process.env, PORT: String(prt), OPENCODE_APP_PREFIX: `/apps/${name}` },
   })
+  fs.closeSync(out)
+  // A missing binary reports asynchronously; without a listener it would crash the
+  // long-running `apps supervise` loop instead of failing just this app.
+  child.once("error", (err) => console.error(`apps: ${name}: ${err.message}`))
+  if (!child.pid) throw new Error(`could not start ${name}: ${finalCmd[0]} not found`)
   child.unref()
   const reg = readRegistry()
-  // Keep fields other tools store on the entry (e.g. the dashboard's autoRestart).
+  // Keep fields stored by other commands on the entry (e.g. autoRestart).
   // A deploy is a fresh start, so it clears `stopped` and stamps deployedAt; a
   // restore relaunches the same deployment and keeps its original deployedAt.
   const { stopped, ...kept } = reg[name] || {}
@@ -278,24 +283,77 @@ function rm(name) {
   console.log(`unregistered ${name} (process, if any, left running)`)
 }
 
+// Relaunch a registered app exactly as recorded. The recorded command has the port
+// baked in, so the app can only come back on that port. Returns false if it is
+// already running.
+async function relaunch(name) {
+  const e = readRegistry()[name]
+  if (!e) throw new Error(`no such app: ${name}`)
+  if (alive(e.pid)) return false
+  if (!Array.isArray(e.cmd) || !e.cmd.length)
+    throw new Error(`${name} has no recorded start command; redeploy it with \`apps run\``)
+  if (e.cwd && !fs.existsSync(e.cwd)) throw new Error(`${name}: working directory is gone: ${e.cwd}`)
+  if (!(await canBind(e.port))) throw new Error(`${name}: port ${e.port} is already in use`)
+  await run(name, e.port, e.cmd, e.cwd, true)
+  return true
+}
+
 async function restore() {
-  const reg = readRegistry()
   let n = 0
-  for (const name of Object.keys(reg)) {
-    const e = reg[name]
-    // An app stopped on purpose (dashboard Stop) stays stopped across restarts.
-    if (Array.isArray(e.cmd) && e.cmd.length && !e.stopped && !alive(e.pid)) {
-      await run(name, e.port, e.cmd, e.cwd, true)
-      n++
-    }
+  for (const [name, e] of Object.entries(readRegistry())) {
+    // An app stopped on purpose (`apps stop`, Stop in the UI) stays stopped across restarts.
+    if (!e || !Array.isArray(e.cmd) || !e.cmd.length || e.stopped) continue
+    // One broken app must not keep the others down.
+    const started = await relaunch(name).catch((err) => console.error(`apps: restore ${err.message}`))
+    if (started) n++
   }
   console.log(`restored ${n} app(s)`)
+}
+
+async function start(name) {
+  if (!(await relaunch(name))) return console.log(`${name} is already running`)
+}
+
+function stopApp(name) {
+  const reg = readRegistry()
+  const e = reg[name]
+  if (!e) throw new Error(`no such app: ${name}`)
+  const pid = e.pid
+  // Record `stopped` before killing, so `apps supervise` never sees the exit as a crash.
+  delete e.pid
+  e.stopped = true
+  writeRegistry(reg)
+  stop(pid)
+  console.log(`stopped ${name}; it stays stopped until \`apps start ${name}\``)
+}
+
+function set(name, key, value) {
+  const reg = readRegistry()
+  if (!reg[name]) throw new Error(`no such app: ${name}`)
+  if (key !== "auto-restart" || !["on", "off"].includes(value))
+    throw new Error("usage: apps set <name> auto-restart on|off")
+  reg[name].autoRestart = value === "on"
+  writeRegistry(reg)
+  console.log(`${name}: auto-restart ${value}`)
+}
+
+// Long-running watchdog, started once by the container entrypoint: relaunches apps
+// with auto-restart on that exited on their own. Apps stopped on purpose are left alone.
+async function supervise(seconds) {
+  console.log(`apps: supervising auto-restart apps every ${seconds}s`)
+  for (;;) {
+    await new Promise((resolve) => setTimeout(resolve, seconds * 1000))
+    for (const [name, e] of Object.entries(readRegistry())) {
+      if (!e || !e.autoRestart || e.stopped || alive(e.pid)) continue
+      await relaunch(name).catch((err) => console.error(`apps: auto-restart ${err.message}`))
+    }
+  }
 }
 
 // Run once at container start. The registry outlives the container, but its pids
 // do not: a fresh container has a new pid namespace, so every recorded pid is stale
 // and may now belong to an unrelated process. Forgetting them keeps `restore`,
-// `kill` and the dashboard from mistaking that process for an app or signalling it.
+// `kill` and the Deployed Apps page from mistaking that process for an app or signalling it.
 function resetPids() {
   const reg = readRegistry()
   const names = Object.keys(reg).filter((n) => reg[n] && reg[n].pid)
@@ -339,6 +397,18 @@ async function main() {
     case "reset-pids":
       resetPids()
       break
+    case "start":
+      await start(rest[0])
+      break
+    case "stop":
+      stopApp(rest[0])
+      break
+    case "set":
+      set(rest[0], rest[1], rest[2])
+      break
+    case "supervise":
+      await supervise(intPort(rest[0]) ?? 10)
+      break
     default:
       console.log(`opencode apps — expose loopback apps under /apps/<name>/  (registry: ${REGISTRY})
 
@@ -352,11 +422,15 @@ usage:
                                        for the chosen port. Never collides with or kills other apps.
   apps add <name> <port>               register an already-running app
   apps list                            list registered apps + status
+  apps start <name>                    relaunch a stopped app with its recorded command and port
+  apps stop <name>                     stop the app and keep it stopped across restarts
+  apps set <name> auto-restart on|off  relaunch the app whenever it exits on its own
   apps kill <name>                     stop the app process and unregister
   apps rm <name>                       unregister without killing
   apps restore                         relaunch registered apps that aren't running
-                                       (skips apps stopped from the dashboard)
+                                       (skips apps stopped with \`apps stop\`)
   apps reset-pids                      forget recorded pids; run only at container start
+  apps supervise [seconds]             watchdog for auto-restart apps (started by the entrypoint)
 
 examples:
   cd /all-workspaces/<id> && apps deploy division        # FastAPI division.py -> /apps/division/
@@ -365,4 +439,4 @@ examples:
   }
 }
 
-main()
+main().catch((err) => die(err.message))

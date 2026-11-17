@@ -170,14 +170,16 @@ RUN git clone --depth 1 --branch ${LIBPST_TAG} https://github.com/pst-format/lib
 COPY container/apps /usr/local/bin/apps
 RUN chmod +x /usr/local/bin/apps
 
-# Deployed Apps dashboard, shown in the opencode sidebar. The entrypoint launches
-# it as the `dashboard` app so it is served at /apps/dashboard/.
-COPY container/dashboard /opt/opencode-dashboard
-
 # Deploy-app skill, available to every workspace. opencode scans
 # $HOME/.agents/skills/**/SKILL.md as global skills, and HOME=/ in this image.
 COPY container/skills /.agents/skills
 #COPY skills /skills
+
+# tini runs as PID 1 and reaps orphaned processes. Deployed apps are detached and
+# re-parented to PID 1 when the `apps` command that launched them exits; without a
+# reaper they turn into zombies that still look alive. Kept in its own layer so the
+# large package layer above stays cached.
+RUN apk add --no-cache tini
 
 # Entrypoint wrapper: relaunch persisted apps (apps restore) before opencode.
 COPY container/entrypoint.sh /usr/local/bin/opencode-entrypoint
@@ -220,5 +222,5 @@ RUN opencode --version \
 
 EXPOSE 3000
 
-ENTRYPOINT ["opencode-entrypoint"]
+ENTRYPOINT ["/sbin/tini", "--", "opencode-entrypoint"]
 CMD ["--hostname", "0.0.0.0", "--port", "3000"]

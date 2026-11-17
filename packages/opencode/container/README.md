@@ -46,6 +46,9 @@ apps run api -- uvicorn main:app --host 127.0.0.1 --port {port} --root-path /app
 
 apps add web 5173     # register an already-running app (explicit port)
 apps list             # show registered apps + live status
+apps stop api         # stop it and keep it stopped across restarts
+apps start api        # relaunch it with its recorded command and port
+apps set api auto-restart on   # relaunch it whenever it exits on its own
 apps kill api         # stop the process group and unregister
 apps restore          # relaunch registered apps that aren't running (e.g. after a pod restart)
 ```
@@ -63,7 +66,7 @@ command + working dir) persists on the `/all-workspaces` volume, so the
 container entrypoint (`container/entrypoint.sh`) runs **`apps restore`**
 automatically when opencode starts in `web` or `serve` mode — deployed apps come
 back up after a pod restart with no manual step. You can also run `apps restore`
-by hand. Apps stopped from the dashboard stay stopped.
+by hand. Apps stopped with `apps stop` (or **Stop** in the UI) stay stopped.
 
 Before restoring, the entrypoint runs `apps reset-pids`. Recorded pids belong to
 the previous container and may now be reused by an unrelated process, so they are
@@ -71,26 +74,28 @@ cleared rather than trusted. Set `OPENCODE_APPS_AUTO_RESTORE=false` to disable t
 starts `OPENCODE_SERVER_MODE=web` by default; set it to `serve` to start that
 mode instead.
 
-## Deployed Apps dashboard
+## Deployed Apps page
 
 Building and running the image: [DOCKER.md](../DOCKER.md).
 
-The image ships a small dashboard (`container/dashboard/`, installed at
-`/opt/opencode-dashboard`) that lists every registered app with its status,
-framework, port and deploy time, and can Open / Start / Stop / Remove apps and
-toggle **Auto-restart**. The web UI's **Deployed Apps** sidebar entry shows it.
+The web UI's **Deployed Apps** sidebar entry (`/deployed-apps`) is built into
+opencode. It lists every registered app with its status, framework, port and deploy
+time, and can Open / Start / Stop / Remove apps and toggle **Auto-restart**.
 
-- The entrypoint launches it as the `dashboard` app (`/apps/dashboard/`) on every
-  container start in `web` or `serve` mode, independent of `OPENCODE_APPS_AUTO_RESTORE`.
-  Set `OPENCODE_APPS_DASHBOARD=false` to skip it.
-- It reads and writes the same registry as the `apps` CLI. It adds three fields:
-  `deployedAt`, `autoRestart`, and `stopped` (set by **Stop** so the app is not
-  relaunched). `apps run`/`apps deploy` keep these fields, stamp `deployedAt` with
-  the deploy time and clear `stopped`; `apps restore` keeps the original `deployedAt`.
-  Apps registered with `apps add` get `deployedAt` when the dashboard first sees them.
-- **Auto-restart** is a watchdog inside the dashboard: every 10 seconds it relaunches
-  apps with auto-restart on that died without being stopped from the dashboard.
+- The page calls opencode's `/deployed-app` API (`deployedApp.*` in the SDK).
+  opencode reads the registry for the list and runs the `apps` CLI for every
+  action, so launching and stopping apps has a single implementation.
+- Registry fields beyond the CLI's launch data: `deployedAt`, `autoRestart`, and
+  `stopped` (set by `apps stop` so the app is not relaunched). `apps run`/`apps deploy`
+  keep these fields, stamp `deployedAt` with the deploy time and clear `stopped`;
+  `apps restore` and `apps start` keep the original `deployedAt`. Apps registered
+  with `apps add` show an unknown deploy time.
+- **Auto-restart** is `apps supervise`, a watchdog the entrypoint starts for the life
+  of the container: every 10 seconds it relaunches apps with auto-restart on that
+  exited without `apps stop`.
 - **Remove** stops the app and unregisters it; its files are kept.
-- The dashboard is code, so it ships in the image (read-only, versioned with each
-  image); only its data (the registry and logs) lives on `/all-workspaces`. Don't
-  place code under `/all-workspaces` in the image: the volume mount hides it.
+- The image runs `tini` as PID 1. Apps are detached and re-parented to PID 1 when
+  the command that launched them exits; tini reaps them when they exit, so a
+  crashed app shows as stopped instead of lingering as a zombie.
+- Images before this page ran a Python dashboard as the `dashboard` app; the
+  entrypoint removes that registry entry on first start.

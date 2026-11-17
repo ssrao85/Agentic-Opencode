@@ -4,7 +4,7 @@ How to build this customized opencode into a Docker image, run it locally, and
 deploy it to OpenShift. All commands run from the repository root unless noted.
 
 - Container configuration rules: [README.md](./README.md#container-configuration)
-- Deployed apps, the `apps` CLI and the dashboard: [container/README.md](./container/README.md)
+- Deployed apps, the `apps` CLI and the Deployed Apps page: [container/README.md](./container/README.md)
 
 ## 1. Prerequisites
 
@@ -68,7 +68,7 @@ Check the image:
 
 ```bash
 docker run --rm --platform linux/amd64 --entrypoint sh opencode-local:latest \
-  -c 'opencode --version && ls /opt/opencode-dashboard'
+  -c 'opencode --version && apps --help | head -1'
 ```
 
 ## 5. Prepare local folders and the config file
@@ -158,8 +158,7 @@ docker run -d --name opencode --restart unless-stopped --platform linux/amd64 \
   the server logs `server is unsecured`. VS Code's Simple Browser cannot show the
   login prompt, so use a normal browser when a password is set.
 - `OPENCODE_APPS_AUTO_RESTORE=false` means apps are **not** relaunched on
-  container start; the Deployed Apps dashboard still starts. Set
-  `OPENCODE_APPS_DASHBOARD=false` to skip the dashboard.
+  container start. The auto-restart watchdog (`apps supervise`) still runs.
 - Optional debug logging: add `-e OPENCODE_PRINT_LOGS=1 -e OPENCODE_LOG_LEVEL=DEBUG`.
 
 ## 7. Add model credentials
@@ -186,14 +185,14 @@ Then `docker restart opencode`.
 
 ```bash
 docker ps --filter name=opencode                         # Up
-docker logs opencode 2>&1 | grep -E "loading exclusive config|launched dashboard|ERROR"
-docker exec opencode apps list                           # dashboard ... up
+docker logs opencode 2>&1 | grep -E "loading exclusive config|supervising|restored|ERROR"
+docker exec opencode apps list                           # your apps and their status
 curl -s -u opencode:change-me -o /dev/null -w '%{http_code}\n' http://localhost:3000/   # 200
 ```
 
 Then open http://localhost:3000, log in, open a project and send a message.
-**Deployed Apps** sits above Settings in the sidebar and opens the dashboard
-(also served directly at http://localhost:3000/apps/dashboard/).
+**Deployed Apps** sits above Settings in the sidebar and opens the Deployed Apps
+page (http://localhost:3000/deployed-apps), which is built into opencode.
 
 ## 9. Day-to-day commands
 
@@ -233,7 +232,7 @@ and run step 6 again with the new tag.
 5. Verify:
 
    ```bash
-   oc logs deployment/<opencode-deployment> | grep -E "loading exclusive config|launched dashboard"
+   oc logs deployment/<opencode-deployment> | grep -E "loading exclusive config|supervising"
    oc exec deploy/<opencode-deployment> -- apps list
    ```
 
@@ -248,8 +247,9 @@ can block the new pod).
 oc patch deployment/<opencode-deployment> -p '{"spec":{"replicas":1,"strategy":{"type":"Recreate","rollingUpdate":null}}}'
 ```
 
-If you used the no-image dashboard copy on the volume before this image, remove
-it after the rollout (and any `command`/`args` override added for it):
+The Deployed Apps page is built into opencode; there is no separate dashboard
+process any more. If you used the no-image Python dashboard copy on the volume
+before, remove it after the rollout (and any `command`/`args` override added for it):
 `oc exec deploy/<opencode-deployment> -- rm -rf /all-workspaces/.opencode/dashboard /all-workspaces/deployed-apps-dashboard`.
 
 ## Troubleshooting
@@ -263,4 +263,5 @@ it after the rollout (and any `command`/`args` override added for it):
 | Logs show `Required configuration file does not exist` | `OPENCODE_CONFIG_ONLY` points to a missing or empty file (step 5). |
 | Chat reply stays empty | Check `docker logs opencode 2>&1 \| grep ERROR`; usually a provider key or quota problem (step 7). |
 | `EACCES: permission denied, mkdir '/.npm'` warnings | Older images only: the image now sets `NPM_CONFIG_CACHE=/tmp/.npm`. For an older image, add `-e NPM_CONFIG_CACHE=/tmp/.npm`. |
-| Deployed Apps page shows `Unknown app: dashboard` | The dashboard is not running: `docker exec opencode apps list`, then `docker restart opencode`. |
+| Deployed Apps page shows `apps CLI failed` | opencode cannot run the `apps` CLI. It ships in the image at `/usr/local/bin/apps`; set `OPENCODE_APPS_CLI` if it lives elsewhere. |
+| A crashed app still shows Running | The container is not running tini as PID 1 (for example the entrypoint was overridden). Keep `ENTRYPOINT ["/sbin/tini", "--", "opencode-entrypoint"]`. |

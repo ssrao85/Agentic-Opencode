@@ -149,6 +149,30 @@ export type MoveSessionError = {
   }
 }
 
+export type DeployedApp = {
+  name: string
+  path: string
+  port: number
+  status: "running" | "stopped"
+  framework?: "fastapi" | "flask" | "streamlit" | "vite" | "next" | "node" | "static"
+  deployedAt?: number
+  autoRestart: boolean
+  startable: boolean
+}
+
+export type NotFoundError = {
+  name: "NotFoundError"
+  data: {
+    message: string
+  }
+}
+
+export type ConflictError = {
+  _tag: "ConflictError"
+  message: string
+  resource?: string
+}
+
 export type SnapshotFileDiff = {
   file?: string
   patch?: string
@@ -2519,13 +2543,6 @@ export type ManagedStorage = {
   refreshIntervalMs: number
 }
 
-export type NotFoundError = {
-  name: "NotFoundError"
-  data: {
-    message: string
-  }
-}
-
 export type ProjectNotFoundError = {
   _tag: "ProjectNotFoundError"
   projectID: string
@@ -2785,12 +2802,6 @@ export type SessionNotFoundError = {
   _tag: "SessionNotFoundError"
   sessionID: string
   message: string
-}
-
-export type ConflictError = {
-  _tag: "ConflictError"
-  message: string
-  resource?: string
 }
 
 export type ServiceUnavailableError = {
@@ -5363,6 +5374,176 @@ export type ExperimentalControlPlaneMoveSessionResponses = {
 
 export type ExperimentalControlPlaneMoveSessionResponse =
   ExperimentalControlPlaneMoveSessionResponses[keyof ExperimentalControlPlaneMoveSessionResponses]
+
+export type DeployedAppListData = {
+  body?: never
+  path?: never
+  query?: never
+  url: "/deployed-app"
+}
+
+export type DeployedAppListErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type DeployedAppListError = DeployedAppListErrors[keyof DeployedAppListErrors]
+
+export type DeployedAppListResponses = {
+  /**
+   * Deployed apps
+   */
+  200: Array<DeployedApp>
+}
+
+export type DeployedAppListResponse = DeployedAppListResponses[keyof DeployedAppListResponses]
+
+export type DeployedAppStartData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: never
+  url: "/deployed-app/{name}/start"
+}
+
+export type DeployedAppStartErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type DeployedAppStartError = DeployedAppStartErrors[keyof DeployedAppStartErrors]
+
+export type DeployedAppStartResponses = {
+  /**
+   * Started app
+   */
+  200: DeployedApp
+}
+
+export type DeployedAppStartResponse = DeployedAppStartResponses[keyof DeployedAppStartResponses]
+
+export type DeployedAppStopData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: never
+  url: "/deployed-app/{name}/stop"
+}
+
+export type DeployedAppStopErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type DeployedAppStopError = DeployedAppStopErrors[keyof DeployedAppStopErrors]
+
+export type DeployedAppStopResponses = {
+  /**
+   * Stopped app
+   */
+  200: DeployedApp
+}
+
+export type DeployedAppStopResponse = DeployedAppStopResponses[keyof DeployedAppStopResponses]
+
+export type DeployedAppRemoveData = {
+  body?: never
+  path: {
+    name: string
+  }
+  query?: never
+  url: "/deployed-app/{name}"
+}
+
+export type DeployedAppRemoveErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type DeployedAppRemoveError = DeployedAppRemoveErrors[keyof DeployedAppRemoveErrors]
+
+export type DeployedAppRemoveResponses = {
+  /**
+   * App stopped and unregistered
+   */
+  200: boolean
+}
+
+export type DeployedAppRemoveResponse = DeployedAppRemoveResponses[keyof DeployedAppRemoveResponses]
+
+export type DeployedAppUpdateData = {
+  body?: {
+    /**
+     * Relaunch the app whenever it exits on its own
+     */
+    autoRestart: boolean
+  }
+  path: {
+    name: string
+  }
+  query?: never
+  url: "/deployed-app/{name}"
+}
+
+export type DeployedAppUpdateErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+  /**
+   * ConflictError
+   */
+  409: ConflictError
+}
+
+export type DeployedAppUpdateError = DeployedAppUpdateErrors[keyof DeployedAppUpdateErrors]
+
+export type DeployedAppUpdateResponses = {
+  /**
+   * Updated app
+   */
+  200: DeployedApp
+}
+
+export type DeployedAppUpdateResponse = DeployedAppUpdateResponses[keyof DeployedAppUpdateResponses]
 
 export type GlobalHealthData = {
   body?: never
