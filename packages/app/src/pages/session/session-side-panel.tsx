@@ -31,6 +31,8 @@ import {
   type Sizing,
 } from "@/pages/session/helpers"
 import { setSessionHandoff } from "@/pages/session/handoff"
+import { APPS_TAB, appsTabRequested, clearAppsTabRequest } from "@/pages/session/apps-tab"
+import { DeployedAppsPanel } from "@/components/deployed-apps-panel"
 import { useSessionLayout } from "@/pages/session/session-layout"
 
 type RenderDiff = (SnapshotFileDiff & { file: string }) | VcsFileDiff
@@ -157,6 +159,14 @@ export function SessionSidePanel(props: {
 
   const fileTreeTab = () => layout.fileTree.tab()
 
+  // The sidebar's Deployed Apps button asks for the Apps tab; open the panel on it.
+  createEffect(() => {
+    if (!appsTabRequested() || !reviewTab()) return
+    clearAppsTabRequest()
+    openReviewPanel()
+    tabs().open(APPS_TAB)
+  })
+
   const setFileTreeTabValue = (value: string) => {
     if (value !== "changes" && value !== "all") return
     layout.fileTree.setTab(value)
@@ -271,6 +281,9 @@ export function SessionSidePanel(props: {
                             </div>
                           </Tabs.Trigger>
                         </Show>
+                        <Show when={reviewTab()}>
+                          <Tabs.Trigger value={APPS_TAB}>{language.t("session.tab.apps")}</Tabs.Trigger>
+                        </Show>
                         <Show when={contextOpen()}>
                           <Tabs.Trigger
                             value="context"
@@ -328,6 +341,14 @@ export function SessionSidePanel(props: {
                     <Show when={reviewTab() && props.canReview()}>
                       <Tabs.Content value="review" class="flex flex-col h-full overflow-hidden contain-strict">
                         <Show when={reviewOpen() && activeTab() === "review"}>{props.reviewPanel()}</Show>
+                      </Tabs.Content>
+                    </Show>
+
+                    <Show when={reviewTab()}>
+                      <Tabs.Content value={APPS_TAB} class="flex flex-col h-full overflow-hidden contain-strict">
+                        <Show when={reviewOpen() && activeTab() === APPS_TAB}>
+                          <DeployedAppsPanel />
+                        </Show>
                       </Tabs.Content>
                     </Show>
 

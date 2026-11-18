@@ -35,6 +35,8 @@ import type { DragEvent } from "@thisbeyond/solid-dnd"
 import { useProviders } from "@/hooks/use-providers"
 import { toaster } from "@opencode-ai/ui/toast"
 import { setV2Toast, showToast, ToastRegion } from "@/utils/toast"
+import { APPS_TAB, clearAppsTabRequest, requestAppsTab } from "@/pages/session/apps-tab"
+import { useSessionLayout } from "@/pages/session/session-layout"
 import { useServerSDK } from "@/context/server-sdk"
 import { clearWorkspaceTerminals } from "@/context/terminal"
 import { dropSessionCaches, pickSessionCacheEvictions } from "@/context/global-sync/session-cache"
@@ -118,6 +120,8 @@ export default function Layout(props: ParentProps) {
   const params = useParams()
   const serverSync = useServerSync()
   const layout = useLayout()
+  // Tab state of the open session, for the Deployed Apps button's active state.
+  const sessionPanel = useSessionLayout()
   const layoutReady = createMemo(() => layout.ready())
   const platform = usePlatform()
   const pickDirectory = useDirectoryPicker()
@@ -1037,7 +1041,7 @@ export default function Layout(props: ParentProps) {
         id: "deployedApps.open",
         title: language.t("command.deployedApps.open"),
         category: language.t("command.category.server"),
-        onSelect: () => navigate("/deployed-apps"),
+        onSelect: openDeployedApps,
       },
       {
         id: "settings.open",
@@ -1284,6 +1288,24 @@ export default function Layout(props: ParentProps) {
     }
     requestAnimationFrame(() => scrollToSession(id, `${directory}:${id}`))
     return root
+  }
+
+  // Deployed Apps is the Apps tab of the session side panel. Outside a project, open the
+  // most recently used one first; the panel opens the tab once it mounts.
+  function openDeployedApps() {
+    requestAppsTab()
+    if (params.dir) return
+    const recent =
+      Object.entries(store.lastProjectSession).toSorted((a, b) => b[1].at - a[1].at)[0]?.[0] ??
+      layout.projects.list()[0]?.worktree
+    if (recent) return void navigateToProject(recent)
+    clearAppsTabRequest()
+    showToast({ title: language.t("deployedApps.openProjectFirst") })
+  }
+
+  function deployedAppsActive() {
+    if (!params.dir) return false
+    return sessionPanel.tabs().active() === APPS_TAB && sessionPanel.view().reviewPanel.opened()
   }
 
   async function navigateToProject(directory: string | undefined) {
@@ -2486,8 +2508,8 @@ export default function Layout(props: ParentProps) {
       helpLabel={() => language.t("sidebar.help")}
       onOpenHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
       deployedAppsLabel={() => language.t("deployedApps.title")}
-      deployedAppsActive={() => location.pathname === "/deployed-apps"}
-      onOpenDeployedApps={() => navigateWithSidebarReset("/deployed-apps")}
+      deployedAppsActive={deployedAppsActive}
+      onOpenDeployedApps={openDeployedApps}
       renderPanel={() =>
         mobile ? <SidebarPanel project={currentProject} mobile /> : <SidebarPanel project={currentProject} merged />
       }

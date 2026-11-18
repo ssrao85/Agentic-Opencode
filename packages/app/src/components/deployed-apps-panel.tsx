@@ -15,7 +15,8 @@ const REFRESH_MS = 5000
 
 type Status = "all" | DeployedApp["status"]
 
-export default function DeployedAppsPage() {
+// Deployed Apps list, shown as the Apps tab of the session side panel.
+export function DeployedAppsPanel() {
   const serverSDK = useServerSDK()
   const server = useServer()
   const language = useLanguage()
@@ -70,14 +71,9 @@ export default function DeployedAppsPage() {
 
   return (
     <div data-component="deployed-apps" class="size-full overflow-y-auto bg-background-base">
-      <div class="mx-auto flex max-w-[1200px] flex-col gap-5 px-4 py-8 sm:px-8">
-        <header class="flex flex-col gap-1">
-          <h1 class="text-20-medium text-text-strong">{language.t("deployedApps.title")}</h1>
-          <p class="text-14-regular text-text-weak">{language.t("deployedApps.subtitle")}</p>
-        </header>
-
-        <div class="flex flex-wrap items-center gap-3">
-          <div class="min-w-[220px] flex-1">
+      <div class="flex flex-col gap-3 px-4 pt-3 pb-6">
+        <div class="flex flex-wrap items-center gap-2">
+          <div class="min-w-[180px] flex-1">
             <TextField
               type="search"
               value={search()}
@@ -116,7 +112,7 @@ export default function DeployedAppsPage() {
             </Empty>
           </Match>
           <Match when={visible().length}>
-            <div class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,400px),1fr))] gap-4">
+            <div class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,360px),1fr))] gap-3">
               <For each={visible()}>
                 {(app) => {
                   const running = () => app.status === "running"
@@ -124,11 +120,11 @@ export default function DeployedAppsPage() {
                   return (
                     <article
                       data-slot="deployed-app"
-                      class="flex flex-col gap-3.5 rounded-xl border border-border-weak-base bg-surface-raised-base p-5"
+                      class="flex flex-col gap-3 rounded-xl border border-border-weak-base bg-surface-raised-base p-4"
                     >
                       <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                          <h2 class="break-words text-16-medium text-text-strong">{title(app.name)}</h2>
+                          <h2 class="break-words text-14-medium text-text-strong">{title(app.name)}</h2>
                           <div class="break-all text-13-regular text-text-weak">{app.path}</div>
                         </div>
                         <span class="flex shrink-0 items-center gap-1.5 text-13-regular text-text-weak">

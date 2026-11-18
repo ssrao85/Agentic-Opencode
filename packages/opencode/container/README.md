@@ -74,13 +74,15 @@ cleared rather than trusted. Set `OPENCODE_APPS_AUTO_RESTORE=false` to disable t
 starts `OPENCODE_SERVER_MODE=web` by default; set it to `serve` to start that
 mode instead.
 
-## Deployed Apps page
+## Deployed Apps panel
 
 Building and running the image: [DOCKER.md](../DOCKER.md).
 
-The web UI's **Deployed Apps** sidebar entry (`/deployed-apps`) is built into
-opencode. It lists every registered app with its status, framework, port and deploy
-time, and can Open / Start / Stop / Remove apps and toggle **Auto-restart**.
+Deployed apps are managed inside opencode, in the **Apps** tab of a session's right
+panel (next to Review), so the chat stays in view. The sidebar's **Deployed Apps**
+button opens that tab; from the home screen it first opens the most recent project.
+The tab lists every registered app with its status, framework, port and deploy time,
+and can Open / Start / Stop / Remove apps and toggle **Auto-restart**.
 
 - The page calls opencode's `/deployed-app` API (`deployedApp.*` in the SDK).
   opencode reads the registry for the list and runs the `apps` CLI for every

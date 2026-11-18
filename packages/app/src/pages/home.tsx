@@ -39,6 +39,7 @@ import {
   toggleHomeProjectSelection,
 } from "@/pages/layout/helpers"
 import { useSessionTabAvatarState } from "@/pages/layout/project-avatar-state"
+import { requestAppsTab } from "@/pages/session/apps-tab"
 import { sessionTitle } from "@/utils/session-title"
 import { pathKey } from "@/utils/path-key"
 import { useGlobal } from "@/context/global"
@@ -366,7 +367,11 @@ function HomeDesign() {
           unseenCount={unseenCount}
           openSettings={openSettings}
           openHelp={() => platform.openLink("https://opencode.ai/desktop-feedback")}
-          openDeployedApps={() => navigate("/deployed-apps")}
+          openDeployedApps={() => {
+            // Deployed Apps is the Apps tab of the session side panel; open a project for it.
+            requestAppsTab()
+            openNewSession()
+          }}
           language={language}
         />
 

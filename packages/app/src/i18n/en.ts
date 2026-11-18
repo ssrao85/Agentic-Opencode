@@ -602,6 +602,7 @@ export const dict = {
 
   "session.tab.session": "Session",
   "session.tab.review": "Review",
+  "session.tab.apps": "Apps",
   "session.tab.context": "Context",
   "session.panel.reviewAndFiles": "Review and files",
   "session.review.filesChanged": "{{count}} Files Changed",
@@ -1024,7 +1025,7 @@ export const dict = {
   "workspace.type.local": "local",
   "workspace.type.sandbox": "sandbox",
   "deployedApps.title": "Deployed Apps",
-  "deployedApps.subtitle": "Web apps deployed in this environment, served through opencode under /apps/<name>/.",
+  "deployedApps.openProjectFirst": "Open a project to see deployed apps",
   "deployedApps.search": "Search apps",
   "deployedApps.filter.label": "Filter by status",
   "deployedApps.filter.all": "All statuses",

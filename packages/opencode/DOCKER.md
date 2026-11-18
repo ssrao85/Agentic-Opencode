@@ -4,7 +4,7 @@ How to build this customized opencode into a Docker image, run it locally, and
 deploy it to OpenShift. All commands run from the repository root unless noted.
 
 - Container configuration rules: [README.md](./README.md#container-configuration)
-- Deployed apps, the `apps` CLI and the Deployed Apps page: [container/README.md](./container/README.md)
+- Deployed apps, the `apps` CLI and the Apps panel: [container/README.md](./container/README.md)
 
 ## 1. Prerequisites
 
@@ -191,8 +191,9 @@ curl -s -u opencode:change-me -o /dev/null -w '%{http_code}\n' http://localhost:
 ```
 
 Then open http://localhost:3000, log in, open a project and send a message.
-**Deployed Apps** sits above Settings in the sidebar and opens the Deployed Apps
-page (http://localhost:3000/deployed-apps), which is built into opencode.
+**Deployed Apps** sits above Settings in the sidebar. It opens the **Apps** tab in
+the session's right panel, next to Review, where you can open, start, stop and
+remove apps without leaving the chat.
 
 ## 9. Day-to-day commands
 
@@ -247,7 +248,7 @@ can block the new pod).
 oc patch deployment/<opencode-deployment> -p '{"spec":{"replicas":1,"strategy":{"type":"Recreate","rollingUpdate":null}}}'
 ```
 
-The Deployed Apps page is built into opencode; there is no separate dashboard
+The Apps panel is built into opencode; there is no separate dashboard
 process any more. If you used the no-image Python dashboard copy on the volume
 before, remove it after the rollout (and any `command`/`args` override added for it):
 `oc exec deploy/<opencode-deployment> -- rm -rf /all-workspaces/.opencode/dashboard /all-workspaces/deployed-apps-dashboard`.
@@ -263,5 +264,5 @@ before, remove it after the rollout (and any `command`/`args` override added for
 | Logs show `Required configuration file does not exist` | `OPENCODE_CONFIG_ONLY` points to a missing or empty file (step 5). |
 | Chat reply stays empty | Check `docker logs opencode 2>&1 \| grep ERROR`; usually a provider key or quota problem (step 7). |
 | `EACCES: permission denied, mkdir '/.npm'` warnings | Older images only: the image now sets `NPM_CONFIG_CACHE=/tmp/.npm`. For an older image, add `-e NPM_CONFIG_CACHE=/tmp/.npm`. |
-| Deployed Apps page shows `apps CLI failed` | opencode cannot run the `apps` CLI. It ships in the image at `/usr/local/bin/apps`; set `OPENCODE_APPS_CLI` if it lives elsewhere. |
+| Apps panel shows `apps CLI failed` | opencode cannot run the `apps` CLI. It ships in the image at `/usr/local/bin/apps`; set `OPENCODE_APPS_CLI` if it lives elsewhere. |
 | A crashed app still shows Running | The container is not running tini as PID 1 (for example the entrypoint was overridden). Keep `ENTRYPOINT ["/sbin/tini", "--", "opencode-entrypoint"]`. |
